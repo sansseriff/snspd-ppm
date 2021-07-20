@@ -116,6 +116,34 @@ def checkLockingEffect(dataTags, dataTagsR, xlim=-1, ylim=-1):
     # ax.legend()
     return s3
 
+
+@njit
+def countRateMonitor_b(timetaggs, reduc_factor):
+    delta_time = (timetaggs[-1] - timetaggs[0])//reduc_factor
+    # delta_time is the bin size
+    told = timetaggs[0]
+    current = 0
+    idx = 0
+    counts = []
+    index = []  # for slicing the data array in another parent function
+    #timeR = timetaggs[0] + delta_time
+    timeR = delta_time
+    timetaggs = timetaggs - timetaggs[0]
+    # basic binning in chunks of time
+
+
+    for i in range(len(timetaggs)):
+        current = current + 1
+        if timetaggs[i] > timeR:
+            timeR = timeR + delta_time
+            t_elapsed = timetaggs[i] - told
+            told = timetaggs[i]
+            counts.append(current/t_elapsed)
+            index.append(i)
+            current = 0
+    return counts, delta_time, index
+
+
 @njit
 def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
     delta_time = (timetaggs[-1] - timetaggs[0])//reduc_factor
@@ -128,6 +156,8 @@ def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
     timeR = timetaggs[0] + delta_time
     timetaggs = timetaggs - timetaggs[0]
     # basic binning in chunks of time
+
+
     for i in range(len(timetaggs)):
         if channels[i] == channel_check:
             current = current + 1
@@ -139,12 +169,51 @@ def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
             counts.append(current/t_elapsed)
             index.append(idx)
             current = 0
+    print("option 1: ", len(channels[channels == channel_check]))
+    print("option 1: ", len(channels[channels == -14]))
+    print("option 2: ", index[-1])
     return counts, delta_time, index
 
 
 def find_roots(x,y):  # from some stack overflow answer
     s = np.abs(np.diff(np.sign(y))).astype(bool)
     return x[:-1][s] + np.diff(x)[s]/(np.abs(y[1:][s]/y[:-1][s])+1)
+
+
+def analyze_count_rate_b(timetags, reduc):
+    counts, delta_time, index = countRateMonitor_b(timetags, reduc)
+    Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
+
+    #s3.line((np.arange(len(counts))[1:]/(1e12*len(counts)))*(timetags[-1] - timetags[0]),np.array(counts)[1:]*1e6)
+
+    X = (np.arange(len(counts))[1:]/len(counts))
+    Y = np.array(counts)[1:] * 1e6
+    IDX = np.array(index[:-1])
+    print(IDX[:40])
+    source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
+
+    TOOLTIPS = [
+        ("index", "$index"),
+        ("(x,y)", "($x, $y)"),
+        ("idx", "@idx")
+        ]
+    s3 = figure(plot_width=800, plot_height=400, title="count rate monitor",
+                output_backend="webgl", tools=Tools,
+                active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
+    s3.xaxis.axis_label = "time"
+    s3.yaxis.axis_label = "count rate (MCounts/s)"
+    s3.line('x','y',source = source)
+
+
+    Y2 = find_roots(X,Y - 1)
+
+    marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + 2))
+    #print(Y2*len(X))
+    glyph = Circle(x="x", y="y", size=3, line_color='red', fill_color="white", line_width=3)
+    s3.add_glyph(marker_source, glyph)
+
+
+    return s3, X, Y
 
 
 def analyze_count_rate(timetags, channels, checkChan, reduc):
@@ -156,6 +225,7 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
     X = (np.arange(len(counts))[1:]/len(counts))
     Y = np.array(counts)[1:] * 1e6
     IDX = np.array(index[:-1])
+    print(IDX[:40])
     source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
 
     TOOLTIPS = [
@@ -229,26 +299,30 @@ def runAnalysisJit(path_, file_, delay):
         #     #925348
 
         R = 5000000
-        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,-9)
+        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,-9)
+
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
-        s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -5, 10000)
+        #s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
+        s3, x, y = analyze_count_rate_b(countM, 10000)
         print("Length of tags with R: ", len(channels[0:-1]))
 
         # print(counts)
         # print(delta_time)
         # print("total_time: ", timetags[-1] - timetags[0])
 
-        print("length ", len(dualData))
-
+        print("length dualData", len(dualData))
+        print("length RecoveredClocks", len(RecoveredClocks))
+        print("lenght of countM: ", len(countM))
 
         # bins = np.arange(min(dualData[126600:210400,0]),max(dualData[126600:210400,0]))
         # print(min(dualData[126600:210400,0]))
         # print(max(dualData[126600:210400, 0]))
         print("length of channels: ", len(channels))
         #Clocks, RecoveredClocks, dataTags, dataTagsR, dualData = clockScan(channels[126600:210400], timetags[126600:210400], 18, -5,-14, -9)
-        dualData = dualData[4640:178403]
+        print("lenght of dualData: ", len(dualData))
+        dualData = dualData[434273:605300]
 
-        sequence_data, set_data = import_ground_truth(".//DataGen//tempSave", 1)
+        sequence_data, set_data = import_ground_truth("..//DataGen//tempSave", 1)
         print(sequence_data["times_sequence"])
 
         #dataTags = dataTags[126600:210400]
@@ -287,7 +361,7 @@ def runAnalysisJit(path_, file_, delay):
         return s1, s2, s3, s4
 
 
-path = "..//July7//"
+path = "..//..//July7//"
 file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 #file = "22s_.002_.044_30dB_July7_fullSet_78.125clock_0.1sFalse.1.ttbin"
 s1,s2, s3, s4 = runAnalysisJit(path,file,0)

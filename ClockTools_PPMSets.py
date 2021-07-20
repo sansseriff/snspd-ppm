@@ -38,7 +38,7 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan):
     RecoveredClocks = np.zeros(len(_channels))
     Periods = np.zeros(len(_channels))
     dualData = np.zeros((len(_channels),2))
-
+    countM = np.zeros(len(_channels))
     for i in range(len(_channels)):
         if _channels[i] == clockChan:
             Clocks[j] = _timetags[i]
@@ -74,6 +74,7 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan):
                 if _channels[i] == dataChan1:
 
                     dualData[u,0] = tag
+                    countM[u] = _timetags[i] #this is for count rate analysis in another function
                 if _channels[i] == dataChan2 and abs(tag - dualData[u,0]) < 3000: #2nd tag withing 1ns of 1st tag
                     dualData[u, 1] = tag
                     u = u + 1  # pair identified, get ready for next pair
@@ -82,7 +83,9 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan):
     RecoveredClocks = RecoveredClocks[RecoveredClocks > 0]
     dataTags = dataTags[dataTags > 0]
     Periods = Periods[Periods > 0]
+    dualData = dualData[dualData[:,0] > 0]
+    countM = countM[countM > 0]
 
     #basis = np.linspace(Clocks[0],Clocks[-1],len(Clocks))
     #diffs = Clocks - basis
-    return Clocks, RecoveredClocks, dataTags, dataTagsR, dualData
+    return Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM
