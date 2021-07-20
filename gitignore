@@ -5,3 +5,8 @@
 *.png
 
 *.csv
+
+
+
+.idea/
+**.idea/**
