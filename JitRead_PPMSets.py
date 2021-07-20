@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 from bokeh.io import output_file, show
 from bokeh.layouts import column
 from bokeh.plotting import figure, curdoc
+
 from bokeh.io import export_svg
 from bokeh.layouts import gridplot
 from bokeh.models import Span
