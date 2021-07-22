@@ -33,10 +33,10 @@ y = np.load("y_axis.npy")
 
 
 
-sequence_data, set_data = import_ground_truth(".//DataGen///TempSave//", 0)
+sequence_data, set_data = import_ground_truth("..//DataGen///TempSave//", 28)
 print(sequence_data["times_sequence"])
 print(set_data["pulses_per_cycle"])
-times = np.array(sequence_data["times"])*1e12
+times = np.array(sequence_data["times"])*1e12 + 10000 # adding on 10ns so that redefined clock is 10ns before first data
 
 print(sequence_data["times"])
 histgt,binsgt = np.histogram(times,bins = x)
@@ -68,7 +68,7 @@ s1.line(x[1:], y)
 p = s1.line(x[1:], histgt*20000,color = 'red')
 
 
-slider = Slider(title = 'offset', start = -1000, end = 1000, value = 0, step = 1)
+slider = Slider(title = 'offset', start = -10000, end = 10000, value = 0, step = 10)
 
 
 def update(attr, old, new):

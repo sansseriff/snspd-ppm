@@ -189,7 +189,7 @@ def analyze_count_rate_b(timetags, reduc):
     X = (np.arange(len(counts))[1:]/len(counts))
     Y = np.array(counts)[1:] * 1e6
     IDX = np.array(index[:-1])
-    print(IDX[:40])
+    #print(IDX[:40])
     source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
 
     TOOLTIPS = [
@@ -212,8 +212,10 @@ def analyze_count_rate_b(timetags, reduc):
     glyph = Circle(x="x", y="y", size=3, line_color='red', fill_color="white", line_width=3)
     s3.add_glyph(marker_source, glyph)
 
+    section_list = generate_section_list(X, Y, Y2,IDX)
 
-    return s3, X, Y
+
+    return s3, section_list
 
 
 def analyze_count_rate(timetags, channels, checkChan, reduc):
@@ -253,6 +255,16 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
 
 
 
+
+
+@njit
+def jit_convolve(array1,array2):
+    q = np.zeros(len(array1))
+    for i in range(len(array1)):
+        q[i] = np.dot(array1,array2)
+        array1 = np.roll(array1,-1)
+    return np.arange(len(q)), q
+
 def import_ground_truth(path, cycle_number):
     files = os.listdir(path)
     date_time = files[0].split('_')[1]
@@ -268,8 +280,85 @@ def import_ground_truth(path, cycle_number):
     return sequence_data, set_data
 
 
+def make_ground_truth_hist(ground_truth_path,clock_period, sequence,resolution = 1000):
+    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    times = np.array(
+        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+    bins = np.linspace(0, clock_period, resolution)
+    ground_truth_hist, bins = np.histogram(times, bins=bins)
+    return ground_truth_hist, bins
 
-def runAnalysisJit(path_, file_, delay):
+def find_rough_offset(data,sequence,ground_truth_path,clock_period,resolution = 1000):
+    real_data_bins = np.linspace(0, clock_period, resolution)
+    real_data_hist, bins = np.histogram(data, bins=real_data_bins)
+    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    times = np.array(
+        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+    ground_truth_hist, bins = np.histogram(times, bins=bins)
+    x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    return -(y.argmax()/resolution)*clock_period
+
+def offset_tags(dual_data,offset,clock_period):
+    """
+    Change the clock reference from which the data in dual_data is measured from. When the time offset sends
+    some timetaggs outside of the range from 0 to [clock_period in ps], then those tags are 'rolled over'
+    to the previous or successive group of tags with with a single clock reference.
+    """
+    dual_data = dual_data - offset
+    greater_than_mask = (dual_data[:,0] > clock_period)
+    less_than_mask = (dual_data[:,0] < 0)
+    dual_data[greater_than_mask] = dual_data[greater_than_mask] - clock_period
+    dual_data[less_than_mask] = dual_data[less_than_mask] + clock_period
+    return dual_data
+
+
+def generate_section_list(x,y,x_intercepts,idx):
+    """
+    Takes in a list of x_intercepts and the x and y axese of the count rate vs time plot on which they were found.
+    A list is generated where reach row has an index that is near the beginning of a high count rate region, and has
+    an index that is near the end of that region.
+    """
+    right_old = 0
+    section_list = np.zeros((len(x_intercepts),2),dtype='int64') - 1
+    q = 0
+    threshold = np.mean(y)
+    for intercept in x_intercepts:
+        left = np.argmax(x > intercept) - 3
+        right = np.argmax(x > intercept) + 3
+        # print("value at left side: ", y[left])
+        # print("value at right side: ", y[right])
+        if y[right_old] > threshold and y[left] > threshold:
+            # add that pair to the section list
+            section_list[q,0] = right_old
+            section_list[q, 1] = left
+            q = q + 1
+        right_old = right
+
+    section_list = section_list[section_list[:,0] >= 0]
+    print("identified ", len(section_list), " sections of high count rate.")
+
+    # convert to dualData scaling from plot scaling
+    for row in section_list:
+        row[0] = idx[row[0]]
+        row[1] = idx[row[1]]
+
+    return section_list
+
+
+def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path):
+    bins = np.linspace(0, clock_period, 5000000)
+    final_hist, final_bins = np.histogram(dual_data[:, 1], bins)
+    gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
+                                          resolution=5000000)
+    plt.figure()
+    plt.plot(bins[1:], gthist * 20000)
+    plt.plot(final_bins[1:], final_hist)
+
+    import_ground_truth(gt_path, cycle_number)
+
+
+
+def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
     file_reader = FileReader(full_path)
 
@@ -288,73 +377,62 @@ def runAnalysisJit(path_, file_, delay):
 
 
         step = len(channels)//120
-        # c = 0
-        # for i in range(120):
-        #     print('$$$$$$$$$$$$$$$$$$$$$')
-        #     print(channels[c:c+17])
-        #     #print(timetags[c:c + 17])
-        #     c = c + step
-        #     print(c)
-        #     print('$$$$$$$$$$$$$$$$$$$$$')
-        #     #925348
+
 
         R = 5000000
+        # gt_path = "..//DataGen///TempSave//"
         Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,-9)
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
-        #s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
-        s3, x, y = analyze_count_rate_b(countM, 10000)
+        # s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
+
+        # identify sections in the file where the AWG is sending a sequence.
+        s3, section_list = analyze_count_rate_b(countM, 10000)
+
         print("Length of tags with R: ", len(channels[0:-1]))
+        #section_list = generate_section_list(x, y, x_intercepts)
+        print(section_list)
+        # loop over the sequence sent by AWG
 
-        # print(counts)
-        # print(delta_time)
-        # print("total_time: ", timetags[-1] - timetags[0])
+        current_number = 20
+        for i, section in enumerate(section_list):
+            if i != current_number: # this is just used for now so I only look at one section
+                continue
+            # grab the current section of interest from the large array dualData
+            m_data = dualData[section[0]:section[1]]
+            CLOCK_PERIOD = 3200000
+            # will input datatags that correspond only to individual sequences
+            offset = find_rough_offset(m_data,current_number+5,gt_path,CLOCK_PERIOD,resolution = 10000)
 
-        print("length dualData", len(dualData))
-        print("length RecoveredClocks", len(RecoveredClocks))
-        print("lenght of countM: ", len(countM))
+            m_data = offset_tags(m_data, offset,CLOCK_PERIOD)
 
-        # bins = np.arange(min(dualData[126600:210400,0]),max(dualData[126600:210400,0]))
-        # print(min(dualData[126600:210400,0]))
-        # print(max(dualData[126600:210400, 0]))
-        print("length of channels: ", len(channels))
-        #Clocks, RecoveredClocks, dataTags, dataTagsR, dualData = clockScan(channels[126600:210400], timetags[126600:210400], 18, -5,-14, -9)
-        print("lenght of dualData: ", len(dualData))
-        dualData = dualData[434273:605300]
+            generate_PNR_analysis_regions(m_data, current_number+5, CLOCK_PERIOD,gt_path)
 
-        sequence_data, set_data = import_ground_truth("..//DataGen//tempSave", 1)
-        print(sequence_data["times_sequence"])
 
-        #dataTags = dataTags[126600:210400]
-        #print(dualData[420:600])
-        # port = dualData[:,0]
-        # port = port[port>200]
-        # print("lenght of port", len(port))
-        print('length of dataTags', len(dualData[:,0]))
-        # print("Clock difference: ", np.mean(np.diff(Clocks)))
-        Bins = np.linspace(0,3200000,1000)
-        hist, bins = np.histogram(dualData[:,1], bins = Bins)
-        #############
 
-        np.save("x_axis",bins)
-        np.save("y_axis",hist)
-        source = ColumnDataSource(data=dict(
-            x=bins[:-1],
-            y=hist
-        ))
 
-        TOOLTIPS = [
-            ("index", "$index"),
-            ("(x,y)", "($x, $y)")
-        ]
-        Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
-        s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
-                    output_backend="svg", tools=Tools,
-                    active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
-        # s3.xaxis.axis_label = "time"
-        # s3.yaxis.axis_label = "count rate (MCounts/s)"
-        s4.line('x', 'y', source=source)
-        #########
+
+            #############
+
+            real_data_bins = np.linspace(0, 3200000, 10000)
+            real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
+            source = ColumnDataSource(data=dict(
+                x=bins[:-1],
+                y=real_data_hist
+            ))
+
+            TOOLTIPS = [
+                ("index", "$index"),
+                ("(x,y)", "($x, $y)")
+            ]
+            Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
+            s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
+                        output_backend="svg", tools=Tools,
+                        active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
+            # s3.xaxis.axis_label = "time"
+            # s3.yaxis.axis_label = "count rate (MCounts/s)"
+            s4.line('x', 'y', source=source)
+            #########
 
 
 
@@ -363,7 +441,6 @@ def runAnalysisJit(path_, file_, delay):
 
 path = "..//..//July7//"
 file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
-#file = "22s_.002_.044_30dB_July7_fullSet_78.125clock_0.1sFalse.1.ttbin"
-s1,s2, s3, s4 = runAnalysisJit(path,file,0)
-show(column(s1, s2,s3, s4))
-#export_svg(s1, filename="plot.svg")
+gt_path = "..//DataGen///TempSave//"
+s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
+show(column(s1, s2, s3, s4))
