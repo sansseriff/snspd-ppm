@@ -42,6 +42,8 @@ Colors, pallet = viz.bokeh_theme(return_color_list=True)
 colors = Colors
 output_file("layout.html")
 
+Colors2, pallet2 = viz.phd_style(grid=True)
+
 
 
 
@@ -205,7 +207,7 @@ def analyze_count_rate_b(timetags, reduc):
     s3.line('x','y',source = source)
 
 
-    Y2 = find_roots(X,Y - 1)
+    Y2 = find_roots(X,Y - 0.5)
 
     marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + 2))
     #print(Y2*len(X))
@@ -243,7 +245,7 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
     s3.line('x','y',source = source)
 
 
-    Y2 = find_roots(X,Y - 1)
+    Y2 = find_roots(X,Y - 0.5)
 
     marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + 2))
     #print(Y2*len(X))
@@ -264,6 +266,16 @@ def jit_convolve(array1,array2):
         q[i] = np.dot(array1,array2)
         array1 = np.roll(array1,-1)
     return np.arange(len(q)), q
+
+@njit
+def jit_convolve_limited(array1,array2, start,end):
+    array1 = np.roll(array1,start)
+    r = end - start
+    q = np.zeros(r)
+    for i in range(r):
+        q[i] = np.dot(array1,array2)
+        array1 = np.roll(array1,1)
+    return np.arange(len(q)) - start, q
 
 def import_ground_truth(path, cycle_number):
     files = os.listdir(path)
@@ -351,16 +363,259 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
     gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
                                           resolution=5000000)
     plt.figure()
-    plt.plot(bins[1:], gthist * 20000)
+    plt.plot(bins[1:], gthist * 200)
     plt.plot(final_bins[1:], final_hist)
 
-    import_ground_truth(gt_path, cycle_number)
+    sequence_data, set_data  = import_ground_truth(gt_path, cycle_number)
+    times = np.array(
+        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+    print(times)
+
+    times_left = times - 1000
+    times_right = times + 1000  # 400ps window over which to do the calibration
+    #sequence_counts = np.array([])
+    for i, (left, right, current_time) in enumerate(zip(times_left,times_right,times)):
+        mask = (dual_data[:,0] > left) & (dual_data[:,0] < right)
+        counts = dual_data[mask] - current_time  # bring the counts to to near-zero
+        l_bound = left - current_time
+        r_bound = right - current_time
+        print(l_bound)
+        if i == 0:
+            sequence_counts = counts
+        else:
+            sequence_counts = np.concatenate((sequence_counts,counts))
+
+
+
+
+
+    bins = np.arange(int(l_bound),int(r_bound))
+
+    hist, bins = np.histogram(sequence_counts[:,0],bins = bins)
+    hist2, bins = np.histogram(sequence_counts[:, 1], bins=bins)
+    plt.figure()
+    plt.plot(bins[1:],hist)
+    plt.plot(bins[1:], hist2)
+
+
+
+    return sequence_counts
+
+
+def find_pnr_correction(counts):
+    # I might have to do some data cleaning here?
+    slices = np.arange(0, 2000, 4)
+    corr1 = []
+    corr2 = []
+    for i in range(len(slices) - 1):
+        left_bound = slices[i]
+        right_bound = slices[i + 1]
+        delta_t = counts[:, 1] - counts[:, 0]
+        mask = (delta_t > left_bound) & (delta_t <= right_bound)
+        corr1.append(np.mean(counts[:, 0][mask]))
+        corr2.append(np.mean(counts[:, 1][mask]))
+
+    corr1 = np.array(corr1)
+    corr2 = np.array(corr2)
+
+    # fill in NaNs
+    mask = np.isnan(corr1)
+    corr1[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), corr1[~mask])
+
+    mask = np.isnan(corr2)
+    corr2[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), corr2[~mask])
+
+    return slices, corr1, corr2
+
+
+def viz_counts_and_correction(counts,slices,corr1,corr2):
+
+    bins = np.arange(-1000,1000)
+    fig, ax = plt.subplots(1, 2, figsize=(6, 4))
+    ax[0].hist2d(counts[:, 1] - counts[:, 0], counts[:, 0], bins=(bins, bins),
+                 norm=matplotlib.colors.LogNorm())
+    ax[0].plot(slices[:-1], corr1, color='k')
+
+    ax[1].hist2d(counts[:, 1] - counts[:, 0], counts[:, 1], bins=(bins, bins),
+                 norm=matplotlib.colors.LogNorm())
+    ax[1].plot(slices[:-1], corr2, color='k')
+
+
+
+def apply_pnr_correction(dual_data, slices, corr1, corr2,seperated_arrays = False):
+    corrected1 = np.zeros(len(dual_data))
+    corrected2 = np.zeros(len(dual_data))
+    array_list1 = []
+    array_list2 = []
+    for i in range(len(slices) - 1):
+        left_bound = slices[i]
+        right_bound = slices[i + 1]
+        delta_t = dual_data[:,1] - dual_data[:,0]
+        mask = (delta_t > left_bound) & (delta_t <= right_bound)
+        a = dual_data[:,0][mask] - corr1[i]
+        b = dual_data[:, 1][mask] - corr2[i]
+        corrected1[mask] = a
+        corrected2[mask] = b
+        if seperated_arrays:
+            array_list1.append(a)
+            array_list2.append(b)
+
+    if seperated_arrays:
+        return corrected1, corrected2, array_list1, array_list2
+    else:
+        return corrected1, corrected2
+
+def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False):
+    if hist_set:
+        corrected1, corrected2, array_list1, array_list2 = apply_pnr_correction(sequence_counts, slices, corr1, corr2,
+                                                                            seperated_arrays=True)
+    else:
+        corrected1, corrected2 = apply_pnr_correction(sequence_counts, slices, corr1, corr2,
+                                                                            seperated_arrays=False)
+
+    plt.figure()
+    bins = np.arange(sequence_counts.min(), sequence_counts.max())
+    hist, bins = np.histogram(corrected1, bins=bins)
+    hist2, bins = np.histogram(corrected2, bins=bins)
+    plt.plot(bins[1:], hist)
+    plt.plot(bins[1:], hist2)
+
+    m = (corrected1 <= 25) & (corrected1 > -25)
+    print("ratio: ", m.sum() / len(corrected1))
+
+    if hist_set:
+        plt.figure()
+        i = 0
+        for item in array_list1:
+            if len(item) > 100:
+                i = i + 1
+                bins = np.arange(item.min(), item.max())
+                hist, bins = np.histogram(item, bins=bins, density = True)
+                plt.plot(bins[1:], hist)
+
+        print("iterations: ", i)
+
+
+
+def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_period):
+    sequence_data, set_data = import_ground_truth(gt_path, sequence)
+    times = np.array(
+        sequence_data["times"]) * 1e12 + 10000 # adding 10 ns
+
+    # time_ranges = []
+    #
+    # sums = []
+    # for j in range(-600,600):
+    #     m = False
+    #     for i,time in enumerate(times):
+    #         time_ranges.append([time - slot_width/2,time + slot_width/2])
+    #         right = time - slot_width/2
+    #         left = time + slot_width/2
+    #         m = ((m_data_corrected > right) & (m_data_corrected < left))
+    #         this = 0
+    #     sums.append(m.sum())
+    # plt.figure()
+    # plt.plot(np.arange(len(sums)),sums)
+
+
+    kernel = np.zeros(clock_period + 10000)
+    for time in times:
+        right = int(time - slot_width / 2)
+        left = int(time + slot_width / 2)
+        kernel[right:left] = 1
+
+    hist,bins = np.histogram(m_data_corrected,bins = np.arange(clock_period + 10001))
+    print("lenght of kernel", len(kernel))
+    print("length of hist: ", len(hist))
+
+    plt.figure()
+    plt.plot(bins[1:],hist)
+    plt.plot(bins[1:],kernel*700)
+
+
+    x,y = jit_convolve_limited(hist.astype(float), kernel.astype(float), -200, 200)
+    plt.figure()
+    plt.plot(x,y)
+    print("max of y: ", np.argmax(y))
+
+
+#def time_to_symbol(time,laser_time):
+
+
+
+
+def decode_ppm(m_data_corrected, gt_path, sequence):
+    sequence_data, set_data = import_ground_truth(gt_path, sequence)
+
+
+
+
+    print(sequence_data["times_sequence"])
+    times = np.array(sequence_data["times"])
+    print(times*1e12 + 10000)
+
+    print(set_data['pulses_per_cycle'])
+    laser_time = set_data['laser_time']
+
+    pulses_list = sequence_data["times_sequence"]
+    pulses_per_cycle = set_data['pulses_per_cycle']
+    initial_time = 10000 * 1e-12  # 10 ns
+    generated_times = []
+    base_times = []
+    for pulse in pulses_list:
+        time = initial_time + pulse*laser_time
+        base_times.append(initial_time)
+        initial_time = initial_time + pulses_per_cycle*laser_time
+        generated_times.append(time*1e12)
+
+    #print(generated_times)
+
+
+    section_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
+    print(len(section_list))
+    print(section_list[0])
+    print(section_list[234])
+    print(section_list[2455])
+    print(section_list[8000])
+
+
+    for base_time in base_times:
+        arr =
+
+
+    # need to be able to identify a number for each PPM symbol.
+    # might also be nice to compare fidelity of the same symbol over multiple sequences. To see if dead
+    # time is playing a role.
+
+
+
+@njit
+def
+
+
+
+@njit
+def section_list_manager(section_list):
+
+    for
+
+    section_results = []
+    section_result = np.zeros(len(GROUND TRUTH LENGTH))
+    for section in section_list:
+        for tag in section:
+            if tag > symbol_left[i] and tag < symbol_right[i]:
+                # do something with it
+            else:
+                # go onto next tag
+
+        section_results.append(section_result)
 
 
 
 def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
     file_reader = FileReader(full_path)
+
 
     while file_reader.hasData():
         # Number of events to read at once
@@ -387,52 +642,81 @@ def runAnalysisJit(path_, file_, gt_path):
         # s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
 
         # identify sections in the file where the AWG is sending a sequence.
-        s3, section_list = analyze_count_rate_b(countM, 10000)
-
+        s3, section_list = analyze_count_rate_b(countM, 5000)
+        print(section_list)
         print("Length of tags with R: ", len(channels[0:-1]))
         #section_list = generate_section_list(x, y, x_intercepts)
-        print(section_list)
+        #print(section_list)
         # loop over the sequence sent by AWG
 
-        current_number = 20
-        for i, section in enumerate(section_list):
-            if i != current_number: # this is just used for now so I only look at one section
-                continue
-            # grab the current section of interest from the large array dualData
-            m_data = dualData[section[0]:section[1]]
-            CLOCK_PERIOD = 3200000
-            # will input datatags that correspond only to individual sequences
-            offset = find_rough_offset(m_data,current_number+5,gt_path,CLOCK_PERIOD,resolution = 10000)
+        ###################################################
+        calibrate_number = 1
+        sequence_offset = 6
+        SEQ = calibrate_number + sequence_offset
+        ###################################################
 
-            m_data = offset_tags(m_data, offset,CLOCK_PERIOD)
+        calibrate_section = section_list[calibrate_number]
+        m_data = dualData[calibrate_section[0]:calibrate_section[1]]
+        #print("shape of m_data: ", np.shape(m_data))
+        CLOCK_PERIOD = 3200000
+        # will input datatags that correspond only to individual sequences
+        offset = find_rough_offset(m_data, SEQ, gt_path, CLOCK_PERIOD, resolution=10000)
 
-            generate_PNR_analysis_regions(m_data, current_number+5, CLOCK_PERIOD,gt_path)
+        m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
+
+        sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
+                                                        gt_path)
+
+        slices, corr1, corr2 = find_pnr_correction(sequence_counts)
+        viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
+        viz_correction_effect(sequence_counts, slices, corr1, corr2)
+        m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
+        # now do an accurate scan
+
+        # I don't think accurate_delay_scan is necessary based on how the calibraton removes small delays.
+        #accurate_delay_scan(m_data_corrected,gt_path,calibrate_number+sequence_offset,50,CLOCK_PERIOD)
+        #test, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
+
+        # hist, bins = np.histogram(test,bins = np.arange(0,3200000))
+        # plt.figure()
+        # plt.plot(bins[1:],hist)
+
+        decode_ppm(m_data_corrected, gt_path,SEQ)
+
+
+        for i, section in enumerate(section_list[1:]):
+            # stuff for capturing data
+            continue
 
 
 
 
 
-            #############
 
-            real_data_bins = np.linspace(0, 3200000, 10000)
-            real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
-            source = ColumnDataSource(data=dict(
-                x=bins[:-1],
-                y=real_data_hist
-            ))
 
-            TOOLTIPS = [
-                ("index", "$index"),
-                ("(x,y)", "($x, $y)")
-            ]
-            Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
-            s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
-                        output_backend="svg", tools=Tools,
-                        active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
-            # s3.xaxis.axis_label = "time"
-            # s3.yaxis.axis_label = "count rate (MCounts/s)"
-            s4.line('x', 'y', source=source)
-            #########
+
+
+        #############
+
+        real_data_bins = np.linspace(0, 3200000, 10000)
+        real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
+        source = ColumnDataSource(data=dict(
+            x=bins[:-1],
+            y=real_data_hist
+        ))
+
+        TOOLTIPS = [
+            ("index", "$index"),
+            ("(x,y)", "($x, $y)")
+        ]
+        Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
+        s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
+                    output_backend="svg", tools=Tools,
+                    active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
+        # s3.xaxis.axis_label = "time"
+        # s3.yaxis.axis_label = "count rate (MCounts/s)"
+        s4.line('x', 'y', source=source)
+        #########
 
 
 
@@ -440,7 +724,9 @@ def runAnalysisJit(path_, file_, gt_path):
 
 
 path = "..//..//July7//"
-file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
+#file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
+
+file = "25s_.002_.044_30dB_July7_fullSet_78.125clock_0.3s.1.ttbin"
 gt_path = "..//DataGen///TempSave//"
 s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
 show(column(s1, s2, s3, s4))
