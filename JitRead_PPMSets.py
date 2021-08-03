@@ -11,7 +11,7 @@ import timeit
 from bokeh.plotting import figure, output_file, show
 from scipy.stats import norm
 from scipy.interpolate import interp1d
-from math import sin, cos
+import math
 from scipy.stats import norm
 import phd
 # import matplotlib
@@ -64,6 +64,7 @@ def checkLocking(Clocks, RecoveredClocks,mpl = False):
         plt.figure()
         plt.plot(x,diffs)
         plt.plot(x,diffsRecovered)
+        plt.title("check locking")
         return
 
 
@@ -412,6 +413,11 @@ def generate_section_list(x,y,x_intercepts,idx):
 
 
 def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path):
+
+    """
+    finds regions of time about 2ns wide where detector counts are known to be. Adds the counts from multiple regions
+    in one awg sequence to a single list of tags that can be used together for PNR effect cancellation.
+    """
     bins = np.linspace(0, clock_period, 5000000)
     final_hist, final_bins = np.histogram(dual_data[:, 1], bins)
     gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
@@ -419,6 +425,7 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
     plt.figure()
     plt.plot(bins[1:], gthist * 200)
     plt.plot(final_bins[1:], final_hist)
+    plt.title("for generating PNR analysis regions")
 
     sequence_data, set_data  = import_ground_truth(gt_path, cycle_number)
     times = np.array(
@@ -447,6 +454,7 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
 
     hist, bins = np.histogram(sequence_counts[:,0],bins = bins)
     hist2, bins = np.histogram(sequence_counts[:, 1], bins=bins)
+
     plt.figure()
     plt.plot(bins[1:],hist)
     plt.plot(bins[1:], hist2)
@@ -663,6 +671,53 @@ def section_list_manager(section_list):
 '''
 
 
+def find_diff_regions(tags,extra = 3):
+    # assumed there are a lot of zeros mixed in the list of tags.
+    # these are placeholders so the length of the tags array matches other arrays elsewhere
+    mask = tags > 0
+    idx_ref = np.arange(len(tags))[mask]
+    diffs = np.diff(tags[mask])
+
+
+    plt.figure()
+    plt.title("clock locking analysis")
+    x = np.arange(len(diffs))
+    plt.plot(x, diffs)
+    ind = np.argpartition(diffs, -100)[-100:]  # the indexes of the 100 largest numbers in diffs (from stack overflow)
+    general_max = np.mean(diffs[ind])
+    print(np.mean(diffs[ind]))
+
+    ints = find_roots(x,diffs - general_max/2)
+
+    intersection_viz_y = np.zeros(len(ints)) + general_max/2
+    plt.plot(ints, intersection_viz_y,'o',markersize=2)
+
+    sections = []
+    sections.append([0,int(math.floor(ints[0]))]) # the first big calibrate section
+    for i in range(1,len(ints)-1):
+        if ints[i] - ints[i-1] < 10 and ints[i+1] - ints[i] > 100:
+            right = ints[i]
+        if ints[i] - ints[i-1] > 100 and ints[i+1] - ints[i] < 10:
+            left = ints[i]
+            if ints[i - 1] == right:
+                sections.append([int(math.ceil(right)) + extra,int(math.floor(left)) - extra])
+
+    sections.append([int(math.ceil(left+1)),int(math.floor(ints[-1]))])
+
+    plt.plot(sections[35],[general_max/2,general_max/2], 'o', color = 'red')
+    plt.plot(sections[100], [general_max / 2, general_max / 2], 'o', color='orange')
+
+    # convert sections from the compressed array index to the expanded array index (the format with many zeros)
+    for i, section in enumerate(sections):
+        section[0] = idx_ref[section[0]]
+        section[1] = idx_ref[section[1]]
+
+
+    return sections
+
+
+
+
 def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
     file_reader = FileReader(full_path)
@@ -689,47 +744,35 @@ def runAnalysisJit(path_, file_, gt_path):
         # gt_path = "..//DataGen///TempSave//"
         # print("some channels")
         # print(channels[39099+100000:39099+200+100000])
+
+
         Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,9, clock_mult=4)
 
-        # print("max of dualData: ", np.max(dualData[:,0]))
-        #
-        #
-        # print("some tags from count: ", dualData[0:100,0])
-        # print("some tags from count: ", dualData[-100:-1,0])
-        # print("dirty clock: ", np.where(dirtyClock != 0))
-
-        # print(len(dirtyClock))
-        # print(len(dualData))
-
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
-
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
-        # s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
 
-        # identify sections in the file where the AWG is sending a sequence.
-        # print("length of dirtyClock: ", len(dirtyClock))
-        l = len(dirtyClock)
-        s3, section_list = analyze_count_rate_b(dirtyClock, 200000)
+        section_list = find_diff_regions(dirtyClock,extra = 5)
 
-        # print("time of 757: ", dirtyClock[7573822])
-        # print("time of 8000: ", dirtyClock[8000000])
-        # print("e time: ", dirtyClock[8000000] - dirtyClock[7573822])
-        # print(section_list)
-        # print("Length of tags with R: ", len(channels[0:-1]))
+
+
 
 
 
         # loop over the sequence sent by AWG
         ###################################################
-        calibrate_number = 1
-        sequence_offset = 6
+        calibrate_number = 0
+        sequence_offset = 0
         SEQ = calibrate_number + sequence_offset
         ###################################################
 
-        return s1, s2, s3
+        #return s1, s2, s3
 
         calibrate_section = section_list[calibrate_number]
-        m_data = dualData[calibrate_section[0]:calibrate_section[1]]
+        #m_data = dualData[calibrate_section[0]:calibrate_section[1]]
+        m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]
+
+        print("calibrate_section1: ", calibrate_section[1])
+
         #print("shape of m_data: ", np.shape(m_data))
         CLOCK_PERIOD = 3200000
         # will input datatags that correspond only to individual sequences
@@ -739,8 +782,11 @@ def runAnalysisJit(path_, file_, gt_path):
 
         sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
                                                         gt_path)
-
+        start = time.time()
         slices, corr1, corr2 = find_pnr_correction(sequence_counts)
+        end = time.time()
+        print("correction time: ", end - start)
+
         viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
@@ -754,12 +800,12 @@ def runAnalysisJit(path_, file_, gt_path):
         # plt.figure()
         # plt.plot(bins[1:],hist)
 
-        decode_ppm(m_data_corrected, gt_path,SEQ)
+        #decode_ppm(m_data_corrected, gt_path,SEQ)
 
 
-        for i, section in enumerate(section_list[1:]):
-            # stuff for capturing data
-            continue
+        # for i, section in enumerate(section_list[1:]):
+        #     # stuff for capturing data
+        #     continue
 
 
 
@@ -793,7 +839,7 @@ def runAnalysisJit(path_, file_, gt_path):
 
 
 
-        return s1, s2, s3, s4
+        return s1, s2, s4
 
 
 path = "..//..//July27//"
@@ -803,9 +849,9 @@ path = "..//..//July29//"
 #file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
+file = "340s_.002_.050_july29_picScan_32.0.1.ttbin"
 gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
 #s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
-s1,s2, s3 = runAnalysisJit(path, file, gt_path)
+s1,s2, s4 = runAnalysisJit(path, file, gt_path)
 #show(column(s1, s2, s3, s4))
-show(column(s1, s2, s3))
+show(column(s1, s2, s4))

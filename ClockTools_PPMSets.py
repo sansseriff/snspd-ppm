@@ -8,7 +8,7 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
     j = 0
     k = 0
     deriv = 8000  # increasing this gives less oscillations
-    prop = .000000000000005
+    prop = .0000000000001
     # deriv = 1800
     # prop = .000000000005
     phi0 = 0
