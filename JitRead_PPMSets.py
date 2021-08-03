@@ -121,29 +121,52 @@ def checkLockingEffect(dataTags, dataTagsR, xlim=-1, ylim=-1):
 
 @njit
 def countRateMonitor_b(timetaggs, reduc_factor):
-    delta_time = (timetaggs[-1] - timetaggs[0])//reduc_factor
+    print("legnth of passed array: ", len(timetaggs))
+    print("first in array: ", timetaggs[0])
+    for i in range(len(timetaggs)):
+        if timetaggs[i] > 0:
+            break
+    for j in range(1,len(timetaggs)):
+        if timetaggs[-j] > 0:
+            break
+    delta_time = (timetaggs[-j] - timetaggs[i])//reduc_factor
+    # print("original time: ", timetaggs[-j] - timetaggs[i])
+    # print("this is i: ", i)
+    # print("this is j: ", j)
+    # print("delta time: ", delta_time)
+    # print("ending time: ", timetaggs[-j])
+    # print("beginning time: ", timetaggs[i])
     # delta_time is the bin size
-    told = timetaggs[0]
-    current = 0
-    idx = 0
     counts = []
     index = []  # for slicing the data array in another parent function
     #timeR = timetaggs[0] + delta_time
-    timeR = delta_time
-    timetaggs = timetaggs - timetaggs[0]
+    timetaggs = timetaggs #- timetaggs[i] + 1
     # basic binning in chunks of time
-
-
-    for i in range(len(timetaggs)):
-        current = current + 1
-        if timetaggs[i] > timeR:
-            timeR = timeR + delta_time
-            t_elapsed = timetaggs[i] - told
-            told = timetaggs[i]
-            counts.append(current/t_elapsed)
-            index.append(i)
-            current = 0
-    return counts, delta_time, index
+    print(timetaggs[10000:10010])
+    times = []
+    q = 0
+    zero_counter = 0
+    bla = 0
+    rm_region = np.zeros(reduc_factor)
+    for u in range(0, reduc_factor):
+        current_time = delta_time*u + timetaggs[i]
+        current_sum = 0
+        while timetaggs[q] < current_time:
+            q = q + 1
+            if timetaggs[q] != 0:
+                current_sum = current_sum + 1
+                zero_counter = 0
+            else:
+                bla = bla + 1
+                zero_counter = zero_counter + 1
+        if zero_counter > 3:
+            rm_region[u] = 1
+        times.append(current_time)
+        counts.append(current_sum/delta_time)
+        index.append(q)
+    print("this is bla: ", bla)
+    #return counts, delta_time, index
+    return counts, times, index, rm_region
 
 
 @njit
@@ -158,7 +181,6 @@ def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
     timeR = timetaggs[0] + delta_time
     timetaggs = timetaggs - timetaggs[0]
     # basic binning in chunks of time
-
 
     for i in range(len(timetaggs)):
         if channels[i] == channel_check:
@@ -183,14 +205,29 @@ def find_roots(x,y):  # from some stack overflow answer
 
 
 def analyze_count_rate_b(timetags, reduc):
-    counts, delta_time, index = countRateMonitor_b(timetags, reduc)
+    counts, times, index, rm_region = countRateMonitor_b(timetags, reduc)
+    counts = np.array(counts)
+    times = np.array(times)
+    index = np.array(index)
+
+    # cut out the long regions of zeros for easier plotting
+    print("sum of zero counter: ", np.sum(rm_region))
+    mask = np.invert(rm_region.astype(bool))
+    times = times[mask]
+    counts = counts[mask]
+    index = index[mask]
+    print("this is length of counts: ", len(counts))
+    plt.plot(np.arange(len(rm_region)),rm_region)
+
+
+
     Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
 
     #s3.line((np.arange(len(counts))[1:]/(1e12*len(counts)))*(timetags[-1] - timetags[0]),np.array(counts)[1:]*1e6)
 
-    X = (np.arange(len(counts))[1:]/len(counts))
-    Y = np.array(counts)[1:] * 1e6
-    IDX = np.array(index[:-1])
+    X = np.array(times)  # (np.arange(len(counts))[1:]/len(counts))
+    Y = np.array(counts) * 1e6
+    IDX = np.array(index)
     #print(IDX[:40])
     source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
 
@@ -200,22 +237,25 @@ def analyze_count_rate_b(timetags, reduc):
         ("idx", "@idx")
         ]
     s3 = figure(plot_width=800, plot_height=400, title="count rate monitor",
-                output_backend="webgl", tools=Tools,
+                #output_backend="webgl",
+                tools=Tools,
                 active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
     s3.xaxis.axis_label = "time"
     s3.yaxis.axis_label = "count rate (MCounts/s)"
     s3.line('x','y',source = source)
 
+    #mean = np.mean(Y)
+    mean = 3000000
+    print("the mean is: ", mean)
+    Y2 = find_roots(X,Y - mean)
 
-    Y2 = find_roots(X,Y - 0.5)
-
-    marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + 2))
+    marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + mean))
     #print(Y2*len(X))
     glyph = Circle(x="x", y="y", size=3, line_color='red', fill_color="white", line_width=3)
     s3.add_glyph(marker_source, glyph)
 
-    section_list = generate_section_list(X, Y, Y2,IDX)
-
+    #section_list = generate_section_list(X, Y, Y2,IDX)
+    section_list = []
 
     return s3, section_list
 
@@ -539,9 +579,6 @@ def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_perio
     print("max of y: ", np.argmax(y))
 
 
-#def time_to_symbol(time,laser_time):
-
-
 
 
 def decode_ppm(m_data_corrected, gt_path, sequence):
@@ -579,8 +616,8 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     print(section_list[8000])
 
 
-    for base_time in base_times:
-        arr =
+    # for base_time in base_times:
+    #     arr =
 
 
     # need to be able to identify a number for each PPM symbol.
@@ -589,15 +626,15 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
 
 
-@njit
-def
+# @njit
+# def
 
 
-
+'''
 @njit
 def section_list_manager(section_list):
 
-    for
+    #for
 
     section_results = []
     section_result = np.zeros(len(GROUND TRUTH LENGTH))
@@ -609,7 +646,7 @@ def section_list_manager(section_list):
                 # go onto next tag
 
         section_results.append(section_result)
-
+'''
 
 
 def runAnalysisJit(path_, file_, gt_path):
@@ -634,26 +671,40 @@ def runAnalysisJit(path_, file_, gt_path):
         step = len(channels)//120
 
 
-        R = 5000000
+        R = 2400000
         # gt_path = "..//DataGen///TempSave//"
-        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,-9)
+        print("some channels")
+        print(channels[39099+100000:39099+200+100000])
+        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,9)
+        print("dirty clock: ", np.where(dirtyClock != 0))
+
+        print(len(dirtyClock))
+        print(len(dualData))
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         # s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
 
         # identify sections in the file where the AWG is sending a sequence.
-        s3, section_list = analyze_count_rate_b(countM, 5000)
-        print(section_list)
-        print("Length of tags with R: ", len(channels[0:-1]))
-        #section_list = generate_section_list(x, y, x_intercepts)
-        #print(section_list)
-        # loop over the sequence sent by AWG
+        # print("length of dirtyClock: ", len(dirtyClock))
+        l = len(dirtyClock)
+        s3, section_list = analyze_count_rate_b(dirtyClock, 200000)
 
+        # print("time of 757: ", dirtyClock[7573822])
+        # print("time of 8000: ", dirtyClock[8000000])
+        # print("e time: ", dirtyClock[8000000] - dirtyClock[7573822])
+        # print(section_list)
+        # print("Length of tags with R: ", len(channels[0:-1]))
+
+
+
+        # loop over the sequence sent by AWG
         ###################################################
         calibrate_number = 1
         sequence_offset = 6
         SEQ = calibrate_number + sequence_offset
         ###################################################
+
+        return s1, s2, s3
 
         calibrate_section = section_list[calibrate_number]
         m_data = dualData[calibrate_section[0]:calibrate_section[1]]
@@ -723,10 +774,16 @@ def runAnalysisJit(path_, file_, gt_path):
         return s1, s2, s3, s4
 
 
-path = "..//..//July7//"
+path = "..//..//July27//"
+path = "..//..//July29//"
 #file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
-file = "25s_.002_.044_30dB_July7_fullSet_78.125clock_0.3s.1.ttbin"
-gt_path = "..//DataGen///TempSave//"
-s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
-show(column(s1, s2, s3, s4))
+#file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
+#file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
+#file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
+file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
+gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
+#s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
+s1,s2, s3 = runAnalysisJit(path, file, gt_path)
+#show(column(s1, s2, s3, s4))
+show(column(s1, s2, s3))
