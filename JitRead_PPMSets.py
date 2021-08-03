@@ -47,13 +47,26 @@ Colors2, pallet2 = viz.phd_style(grid=True)
 
 
 
-def checkLocking(Clocks, RecoveredClocks):
+def checkLocking(Clocks, RecoveredClocks,mpl = False):
 
     Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
     basis = np.linspace(Clocks[0], Clocks[-1], len(Clocks))
     diffs = Clocks - basis
     diffsRecovered = RecoveredClocks - basis
-    x = np.arange(0, len(diffs))
+    s = 12800000/1e12
+    print("s is this: ", s)
+    print(len(diffs))
+    x = np.arange(0, len(diffs))*s
+
+    print(np.max(x))
+
+    if mpl:
+        plt.figure()
+        plt.plot(x,diffs)
+        plt.plot(x,diffsRecovered)
+        return
+
+
     source = ColumnDataSource(data=dict(
         x=x[1:-1:8],
         y1=diffs[1:-1:8],
@@ -217,6 +230,7 @@ def analyze_count_rate_b(timetags, reduc):
     counts = counts[mask]
     index = index[mask]
     print("this is length of counts: ", len(counts))
+    plt.figure()
     plt.plot(np.arange(len(rm_region)),rm_region)
 
 
@@ -673,15 +687,23 @@ def runAnalysisJit(path_, file_, gt_path):
 
         R = 2400000
         # gt_path = "..//DataGen///TempSave//"
-        print("some channels")
-        print(channels[39099+100000:39099+200+100000])
-        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,9)
-        print("dirty clock: ", np.where(dirtyClock != 0))
+        # print("some channels")
+        # print(channels[39099+100000:39099+200+100000])
+        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,9, clock_mult=4)
 
-        print(len(dirtyClock))
-        print(len(dualData))
+        # print("max of dualData: ", np.max(dualData[:,0]))
+        #
+        #
+        # print("some tags from count: ", dualData[0:100,0])
+        # print("some tags from count: ", dualData[-100:-1,0])
+        # print("dirty clock: ", np.where(dirtyClock != 0))
+
+        # print(len(dirtyClock))
+        # print(len(dualData))
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
+
+        checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
         # s3,x,y = analyze_count_rate(timetags[0:-1],channels[0:-1], -14, 10000)
 
         # identify sections in the file where the AWG is sending a sequence.

@@ -18,7 +18,7 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
     u = 0
     print("refernce channel is: ", refChan)
 
-    clock_set = np.zeros(clock_mult)
+    clock_set = np.zeros(clock_mult + 5)
     cki = 0
 
     Clocks = np.zeros(len(_channels))
@@ -62,11 +62,27 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
             Periods[j] = period
 
             # make array of added clock tags
-            if j >= 1:
+            if j >= 2:
                 delta_clock = clock0 - RecoveredClocks[j - 1]
+
                 sub = delta_clock/clock_mult
                 for p in range(len(clock_set)):
                     clock_set[p] = clock0 + p*sub
+                # if j == 32:
+                #     print("j32 delta clock: ", delta_clock)
+                #     print("sub: ", sub)
+                #     print("clock_set: ", clock_set)
+                # if j == 8000:
+                #     print("##############################")
+                #     print("j8000 delta clock: ", delta_clock)
+                #     print("sub: ", sub)
+                #     print("clock_set: ", clock_set)
+                # if j == 16000:
+                #     print("##############################")
+                #     print("j32 delta clock: ", delta_clock)
+                #     print("sub: ", sub)
+                #     print("clock_set: ", clock_set)
+                clock0_extended = clock0
                 cki = 0
             j = j + 1
 
@@ -75,17 +91,32 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                 # do something with it later
                 dirtyClock[u] = _timetags[i]
                 continue
-            if j < 2:
+            if j < 4:
                 # not enough recovered clocks available yet. Throw out that data
                 continue
 
             else:
-                if _timetags[i] >= clock_set[cki + 1]:
+                while _timetags[i] >= clock0_extended + sub:
                     cki = cki + 1
-                    clock0_extended = clock_set[cki]
+                    #clock0_extended = clock_set[cki]
+                    clock0_extended = clock0_extended + sub
                 # tag = _timetags[i] - clock0
+
                 tag = _timetags[i] - clock0_extended
                 tagR = _timetags[i] - currentClock
+                # if k == 1000:
+                #     print("k1000 clock0_extended: ", clock0_extended)
+                #     print(_timetags[i])
+                #     print(tag)
+                # if k == 8000:
+                #     print("##############################")
+                #     print("k8000 clock0_extended: ", clock0_extended)
+                #     print(_timetags[i])
+                #     print(tag)
+
+                # if k % 1000 == 0:
+                #     print(tag)
+                #     print("sub: ", sub)
                 dataTags[k] = tag
                 dataTagsR[k] = tagR
                 k = k + 1
