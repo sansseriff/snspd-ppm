@@ -579,8 +579,8 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     print(section_list[8000])
 
 
-    for base_time in base_times:
-        arr =
+    # for base_time in base_times:
+    #     arr =
 
 
     # need to be able to identify a number for each PPM symbol.
@@ -589,26 +589,24 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
 
 
-@njit
-def
 
 
 
-@njit
-def section_list_manager(section_list):
-
-    for
-
-    section_results = []
-    section_result = np.zeros(len(GROUND TRUTH LENGTH))
-    for section in section_list:
-        for tag in section:
-            if tag > symbol_left[i] and tag < symbol_right[i]:
-                # do something with it
-            else:
-                # go onto next tag
-
-        section_results.append(section_result)
+# @njit
+# def section_list_manager(section_list):
+#
+#     for
+#
+#     section_results = []
+#     section_result = np.zeros(len(GROUND TRUTH LENGTH))
+#     for section in section_list:
+#         for tag in section:
+#             if tag > symbol_left[i] and tag < symbol_right[i]:
+#                 # do something with it
+#             else:
+#                 # go onto next tag
+#
+#         section_results.append(section_result)
 
 
 
