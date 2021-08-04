@@ -359,8 +359,15 @@ def find_rough_offset(data,sequence,ground_truth_path,clock_period,resolution = 
     real_data_bins = np.linspace(0, clock_period, resolution)
     real_data_hist, bins = np.histogram(data, bins=real_data_bins)
     sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses*set_data["laser_time"]*1e12
+    print("dead time in ps: ", dead_time_ps)
+
+    # !!!! I am adding dead_time_ps because I want to move the clock tag to:
+    # the FIRST laser pulse of the LAST deadtime in the awg sequences.
     times = np.array(
-        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+        sequence_data["times"]) * 1e12 + dead_time_ps  # adding on 10ns so that redefined clock is 10ns before first data
     ground_truth_hist, bins = np.histogram(times, bins=bins)
     x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
     return -(y.argmax()/resolution)*clock_period
@@ -428,8 +435,11 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
     plt.title("for generating PNR analysis regions")
 
     sequence_data, set_data  = import_ground_truth(gt_path, cycle_number)
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
+
     times = np.array(
-        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+        sequence_data["times"]) * 1e12 + dead_time_ps  # adding on 10ns so that redefined clock is 10ns before first data
     print(times)
 
     times_left = times - 1000
@@ -561,8 +571,11 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
 
 def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_period):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
+
     times = np.array(
-        sequence_data["times"]) * 1e12 + 10000 # adding 10 ns
+        sequence_data["times"]) * 1e12 + dead_time_ps # adding 10 ns
 
     # time_ranges = []
     #
@@ -580,6 +593,7 @@ def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_perio
     # plt.plot(np.arange(len(sums)),sums)
 
 
+    # below is not updated
     kernel = np.zeros(clock_period + 10000)
     for time in times:
         right = int(time - slot_width / 2)
@@ -605,37 +619,76 @@ def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_perio
 
 def decode_ppm(m_data_corrected, gt_path, sequence):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
 
 
 
-
-    print(sequence_data["times_sequence"])
+    #print(sequence_data["times_sequence"])
     times = np.array(sequence_data["times"])
-    print(times*1e12 + 10000)
+    #print(times*1e12 + 10000)
 
-    print(set_data['pulses_per_cycle'])
-    laser_time = set_data['laser_time']
+    #print(set_data['pulses_per_cycle'])
+    laser_time = set_data['laser_time']*1e12  # in ps
 
     pulses_list = sequence_data["times_sequence"]
     pulses_per_cycle = set_data['pulses_per_cycle']
-    initial_time = 10000 * 1e-12  # 10 ns
+    # initial_time = dead_time_ps * 1e-12  # 250ns (for 20GHz)
+    initial_time = 0
     generated_times = []
     base_times = []
+    symbols = []  # will be list of dicts
     for pulse in pulses_list:
         time = initial_time + pulse*laser_time
+        generated_times.append(time)
         base_times.append(initial_time)
+
+        symbol_params = {"start_symbol_time":initial_time,
+                         "start_data_time": initial_time + dead_time_ps,
+                         "end_time": initial_time + (pulses_per_cycle - 1)*laser_time,
+                         "true_pulse":pulse,
+                         "laser_time": laser_time,
+                         }
+        symbols.append(symbol_params)
         initial_time = initial_time + pulses_per_cycle*laser_time
-        generated_times.append(time*1e12)
+
+
 
     #print(generated_times)
 
 
-    section_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
-    print(len(section_list))
-    print(section_list[0])
-    print(section_list[234])
-    print(section_list[2455])
-    print(section_list[8000])
+    tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
+
+
+    for tag in tag_group_list[1]: #generalize later
+        symbol_start = tag_group_list[q]["start_symbol_time"]
+        symbol_end = tag_group_list[q]["end_time"]
+        if tag > symbol_start and tag < symbol_end:
+            # process as PPM
+            decode_symbol(tag,tag_group_list[q])
+        else:
+            # move onto next PPM region
+
+
+
+
+    print(len(tag_group_list))
+    print(tag_group_list[0]) # don't use the 1st section, it may be partially filled.
+    print(tag_group_list[33])
+    print(tag_group_list[24])
+    # print(tag_group_list[56])
+    # print(tag_group_list[60])
+    print(tag_group_list[13])
+
+
+    b = 0
+    for i in range(len(tag_group_list)):
+        if i > 0:
+            b = b + len(tag_group_list[i])
+
+    print("number of detections per awg sequence: ", b/(len(tag_group_list) - 1))
+
+    print("##################################")
 
 
     # for base_time in base_times:
@@ -757,13 +810,10 @@ def runAnalysisJit(path_, file_, gt_path):
 
 
 
-
-        # loop over the sequence sent by AWG
-        ###################################################
         calibrate_number = 0
         sequence_offset = 0
         SEQ = calibrate_number + sequence_offset
-        ###################################################
+
 
         #return s1, s2, s3
 
@@ -790,6 +840,35 @@ def runAnalysisJit(path_, file_, gt_path):
         viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
+
+
+        imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
+        # imgData is now shorter than dualData because it does not include the calibrate region.
+
+        print("difference in length: ", len(dualData) - len(imgData))
+        print("calibrate seciton 1: ", calibrate_section[1])
+        imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
+
+
+        print(section_list[:40])
+
+        # loop over the whole image
+        for i, slice in enumerate(section_list):
+            if i == 0:  # fist section used only for calibration
+                continue
+            if i > 1:
+                break
+            left = slice[0] - calibrate_section[1]
+            right= slice[1] - calibrate_section[1]
+            #current_data = dualData[left:right]
+
+            print("left: ", left)
+            print("right: ", right)
+            current_data_corrected = imgData_corrected[left:right]
+            decode_ppm(current_data_corrected, gt_path, i)
+
+
+
         # now do an accurate scan
 
         # I don't think accurate_delay_scan is necessary based on how the calibraton removes small delays.
@@ -842,14 +921,14 @@ def runAnalysisJit(path_, file_, gt_path):
         return s1, s2, s4
 
 
-path = "..//..//July27//"
+#path = "..//..//July27//"
 path = "..//..//July29//"
 #file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
 #file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-file = "340s_.002_.050_july29_picScan_32.0.1.ttbin"
+file = "340s_.002_.050_july29_picScan_18.0.1.ttbin"
 gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
 #s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
 s1,s2, s4 = runAnalysisJit(path, file, gt_path)
