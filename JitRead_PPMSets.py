@@ -349,8 +349,10 @@ def import_ground_truth(path, cycle_number):
 
 def make_ground_truth_hist(ground_truth_path,clock_period, sequence,resolution = 1000):
     sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
     times = np.array(
-        sequence_data["times"]) * 1e12 + 10000  # adding on 10ns so that redefined clock is 10ns before first data
+        sequence_data["times"]) * 1e12 + dead_time_ps
     bins = np.linspace(0, clock_period, resolution)
     ground_truth_hist, bins = np.histogram(times, bins=bins)
     return ground_truth_hist, bins
@@ -368,8 +370,12 @@ def find_rough_offset(data,sequence,ground_truth_path,clock_period,resolution = 
     # the FIRST laser pulse of the LAST deadtime in the awg sequences.
     times = np.array(
         sequence_data["times"]) * 1e12 + dead_time_ps  # adding on 10ns so that redefined clock is 10ns before first data
+    # the extra 1000 cancels out a 1ns delay added in the sequenceGenerator script
     ground_truth_hist, bins = np.histogram(times, bins=bins)
     x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    plt.figure()
+    plt.plot(x,y)
+    print("max found at ", y.argmax())
     return -(y.argmax()/resolution)*clock_period
 
 def offset_tags(dual_data,offset,clock_period):
@@ -384,6 +390,15 @@ def offset_tags(dual_data,offset,clock_period):
     dual_data[greater_than_mask] = dual_data[greater_than_mask] - clock_period
     dual_data[less_than_mask] = dual_data[less_than_mask] + clock_period
     return dual_data
+
+
+def offset_tags_single(data, offset, clock_period):
+    data = data - offset
+    greater_than_mask = (data > clock_period)
+    less_than_mask = (data < 0)
+    data[greater_than_mask] = data[greater_than_mask] - clock_period
+    data[less_than_mask] = data[less_than_mask] + clock_period
+    return data
 
 
 def generate_section_list(x,y,x_intercepts,idx):
@@ -439,7 +454,7 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
 
     times = np.array(
-        sequence_data["times"]) * 1e12 + dead_time_ps  # adding on 10ns so that redefined clock is 10ns before first data
+        sequence_data["times"]) * 1e12 + dead_time_ps
     print(times)
 
     times_left = times - 1000
@@ -551,6 +566,7 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
     hist2, bins = np.histogram(corrected2, bins=bins)
     plt.plot(bins[1:], hist)
     plt.plot(bins[1:], hist2)
+    plt.title("viz correction effect")
 
     m = (corrected1 <= 25) & (corrected1 > -25)
     print("ratio: ", m.sum() / len(corrected1))
@@ -569,50 +585,52 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
 
 
 
-def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_period):
-    sequence_data, set_data = import_ground_truth(gt_path, sequence)
-    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
-    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
-
-    times = np.array(
-        sequence_data["times"]) * 1e12 + dead_time_ps # adding 10 ns
-
-    # time_ranges = []
-    #
-    # sums = []
-    # for j in range(-600,600):
-    #     m = False
-    #     for i,time in enumerate(times):
-    #         time_ranges.append([time - slot_width/2,time + slot_width/2])
-    #         right = time - slot_width/2
-    #         left = time + slot_width/2
-    #         m = ((m_data_corrected > right) & (m_data_corrected < left))
-    #         this = 0
-    #     sums.append(m.sum())
-    # plt.figure()
-    # plt.plot(np.arange(len(sums)),sums)
-
-
-    # below is not updated
-    kernel = np.zeros(clock_period + 10000)
-    for time in times:
-        right = int(time - slot_width / 2)
-        left = int(time + slot_width / 2)
-        kernel[right:left] = 1
-
-    hist,bins = np.histogram(m_data_corrected,bins = np.arange(clock_period + 10001))
-    print("lenght of kernel", len(kernel))
-    print("length of hist: ", len(hist))
-
-    plt.figure()
-    plt.plot(bins[1:],hist)
-    plt.plot(bins[1:],kernel*700)
-
-
-    x,y = jit_convolve_limited(hist.astype(float), kernel.astype(float), -200, 200)
-    plt.figure()
-    plt.plot(x,y)
-    print("max of y: ", np.argmax(y))
+# def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_period):
+#     sequence_data, set_data = import_ground_truth(gt_path, sequence)
+#     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+#     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
+#
+#     times = np.array(
+#         sequence_data["times"]) * 1e12 + dead_time_ps # adding 10 ns
+#
+#     # time_ranges = []
+#     #
+#     # sums = []
+#     # for j in range(-600,600):
+#     #     m = False
+#     #     for i,time in enumerate(times):
+#     #         time_ranges.append([time - slot_width/2,time + slot_width/2])
+#     #         right = time - slot_width/2
+#     #         left = time + slot_width/2
+#     #         m = ((m_data_corrected > right) & (m_data_corrected < left))
+#     #         this = 0
+#     #     sums.append(m.sum())
+#     # plt.figure()
+#     # plt.plot(np.arange(len(sums)),sums)
+#
+#
+#     # below is not updated
+#     kernel = np.zeros(clock_period + 10000)
+#     for time in times:
+#         right = int(time - slot_width / 2)
+#         left = int(time + slot_width / 2)
+#         kernel[right:left] = 1
+#
+#     hist,bins = np.histogram(m_data_corrected,bins = np.arange(clock_period + 10001))
+#     print("lenght of kernel", len(kernel))
+#     print("length of hist: ", len(hist))
+#
+#     plt.figure()
+#     plt.plot(bins[1:],hist)
+#     plt.plot(bins[1:],kernel*700)
+#     plt.title("is this visible?")
+#
+#
+#     x,y = jit_convolve_limited(hist.astype(float), kernel.astype(float), -200, 200)
+#     plt.figure()
+#     plt.plot(x,y)
+#     plt.title("convolution")
+#     print("max of y: ", np.argmax(y))
 
 
 
@@ -635,21 +653,33 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     pulses_per_cycle = set_data['pulses_per_cycle']
     # initial_time = dead_time_ps * 1e-12  # 250ns (for 20GHz)
     initial_time = 0
-    generated_times = []
-    base_times = []
-    symbols = []  # will be list of dicts
+    # generated_times = []
+    # base_times = []
+    # symbols = []  # will be list of dicts
+
+    start_symbol_time = []
+    start_data_time = []
+    end_time = []
+    true_pulse = []
+
+
     for pulse in pulses_list:
         time = initial_time + pulse*laser_time
-        generated_times.append(time)
-        base_times.append(initial_time)
+        # generated_times.append(time)
+        # base_times.append(initial_time)
 
-        symbol_params = {"start_symbol_time":initial_time,
-                         "start_data_time": initial_time + dead_time_ps,
-                         "end_time": initial_time + (pulses_per_cycle - 1)*laser_time,
-                         "true_pulse":pulse,
-                         "laser_time": laser_time,
-                         }
-        symbols.append(symbol_params)
+        # symbol_params = {"start_symbol_time":initial_time,
+        #                  "start_data_time": initial_time + dead_time_ps,
+        #                  "end_time": initial_time + (pulses_per_cycle - 1)*laser_time,
+        #                  "true_pulse":pulse,
+        #                  "laser_time": laser_time,
+        #                  }
+
+        start_symbol_time.append(initial_time)
+        start_data_time.append(initial_time + dead_time_ps)
+        end_time.append(initial_time + (pulses_per_cycle - 1)*laser_time)
+        true_pulse.append(pulse)
+
         initial_time = initial_time + pulses_per_cycle*laser_time
 
 
@@ -660,26 +690,41 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
 
 
-    for tag in tag_group_list[1]: #generalize later
-        symbol_start = tag_group_list[q]["start_symbol_time"]
-        symbol_end = tag_group_list[q]["end_time"]
-        if tag > symbol_start and tag < symbol_end:
-            # process as PPM
-            decode_symbol(tag,tag_group_list[q])
-        else:
-            # move onto next PPM region
+
+    # q = 0
+    # stage = []
+    # for tag in tag_group_list[1]: #generalize later
+    #     symbol_start = start_symbol_time[q]
+    #     symbol_end = end_time[q]
+    #     data_start = start_data_time[q]
+    #     true_p = true_pulse[p]
+    #     if (tag > symbol_start) and (tag < symbol_end):
+    #         # process as PPM
+    #         stage.append(tag)
+    #         # for each tag that is found within one PPM symbol, stage increases in length by 1
+    #     else:
+    #         decode_symbol(stage, symbol_start, symbol_end, data_start, true_p)
+    #         # current tag must be in next PPM symbol.
+    #         # process the staged tags and move to next symbol.
+    #         q = q + 1
+    #         # move onto next PPM region
 
 
 
 
     print(len(tag_group_list))
-    print(tag_group_list[0]) # don't use the 1st section, it may be partially filled.
-    print(tag_group_list[33])
-    print(tag_group_list[24])
-    # print(tag_group_list[56])
-    # print(tag_group_list[60])
-    print(tag_group_list[13])
+    print(tag_group_list[1]) # don't use the 1st section, it may be partially filled.
 
+    for i, tag in enumerate(tag_group_list[1]):
+        print(start_data_time[i])
+        tag = tag - start_data_time[i]
+        tag_group_list[1][i] = tag/50
+    # print(tag_group_list[33])
+    # print(tag_group_list[24])
+    # # print(tag_group_list[56])
+    # # print(tag_group_list[60])
+    # print(tag_group_list[13])
+    print(tag_group_list[1])
 
     b = 0
     for i in range(len(tag_group_list)):
@@ -769,7 +814,18 @@ def find_diff_regions(tags,extra = 3):
     return sections
 
 
+def viz_current_decoding(data,gt_path, clock_period, cycle_number):
 
+    print("viz of cycle number: ", cycle_number)
+    bins = np.linspace(0, clock_period, 500000)
+    final_hist, final_bins = np.histogram(data, bins)
+    gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
+                                          resolution=500000)
+    plt.figure()
+    plt.plot(bins[1:], gthist * 200)
+    plt.plot(final_bins[1:], final_hist)
+    title = "viz_current_decoding of cycle number: " + str(cycle_number)
+    plt.title(title)
 
 def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
@@ -798,8 +854,8 @@ def runAnalysisJit(path_, file_, gt_path):
         # print("some channels")
         # print(channels[39099+100000:39099+200+100000])
 
-
-        Clocks,RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock = clockScan(channels[R:-1],timetags[R:-1],18,-5,-14,9, clock_mult=4)
+        Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
+            channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
@@ -841,13 +897,13 @@ def runAnalysisJit(path_, file_, gt_path):
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
 
-
-        imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
+        print("offset before the addition is: ",offset)
+        #imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
         # imgData is now shorter than dualData because it does not include the calibrate region.
 
-        print("difference in length: ", len(dualData) - len(imgData))
-        print("calibrate seciton 1: ", calibrate_section[1])
-        imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
+        #print("difference in length: ", len(dualData) - len(imgData))
+        #print("calibrate seciton 1: ", calibrate_section[1])
+        imgData_corrected, _ = apply_pnr_correction(dualData[calibrate_section[1]:], slices, corr1, corr2)
 
 
         print(section_list[:40])
@@ -856,6 +912,7 @@ def runAnalysisJit(path_, file_, gt_path):
         for i, slice in enumerate(section_list):
             if i == 0:  # fist section used only for calibration
                 continue
+
             if i > 1:
                 break
             left = slice[0] - calibrate_section[1]
@@ -865,6 +922,15 @@ def runAnalysisJit(path_, file_, gt_path):
             print("left: ", left)
             print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
+
+            print("length of Clocks: ", len(Clocks))
+            print("length of dirtyClocks: ", len(dirtyClock))
+            print("lenght of dualData: ", len(dualData))
+            X = 0
+            current_data_corrected = offset_tags_single(current_data_corrected,offset + X,CLOCK_PERIOD)
+
+            viz_current_decoding(current_data_corrected,gt_path, CLOCK_PERIOD, i)
+
             decode_ppm(current_data_corrected, gt_path, i)
 
 

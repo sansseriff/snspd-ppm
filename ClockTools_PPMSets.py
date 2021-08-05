@@ -43,7 +43,8 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
     Periods = np.zeros(len(_channels))
     dualData = np.zeros((len(_channels),2))
     countM = np.zeros(len(_channels))
-    dirtyClock =  np.zeros(len(_channels))
+    dirtyClock = np.zeros(len(_channels))
+    histClock = np.zeros(len(_channels))
     for i in range(len(_channels)):
         if _channels[i] == clockChan:
             Clocks[j] = _timetags[i]
@@ -90,6 +91,7 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
             if _channels[i] == refChan:
                 # do something with it later
                 dirtyClock[u] = _timetags[i]
+                histClock[u] = _timetags[i] - clock0_extended
                 continue
             if j < 4:
                 # not enough recovered clocks available yet. Throw out that data
@@ -138,8 +140,9 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
     dualData = dualData[dualData[:,0] > 0]
     countM = countM[countM > 0]
     dirtyClock = dirtyClock[:len(dualData)]
+    histClock = histClock[:len(dualData)]
 
 
     # basis = np.linspace(Clocks[0],Clocks[-1],len(Clocks))
     # diffs = Clocks - basis
-    return Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock
+    return Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock
