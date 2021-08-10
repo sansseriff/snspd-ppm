@@ -88,11 +88,6 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
             j = j + 1
 
         else: #data channels
-            if _channels[i] == refChan:
-                # do something with it later
-                dirtyClock[u] = _timetags[i]
-                histClock[u] = _timetags[i] - clock0_extended
-                continue
             if j < 4:
                 # not enough recovered clocks available yet. Throw out that data
                 continue
@@ -104,21 +99,14 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                     clock0_extended = clock0_extended + sub
                 # tag = _timetags[i] - clock0
 
+                if _channels[i] == refChan:
+                    # do something with it later
+                    dirtyClock[u] = _timetags[i]
+                    histClock[u] = _timetags[i] - clock0_extended
+                    continue
+
                 tag = _timetags[i] - clock0_extended
                 tagR = _timetags[i] - currentClock
-                # if k == 1000:
-                #     print("k1000 clock0_extended: ", clock0_extended)
-                #     print(_timetags[i])
-                #     print(tag)
-                # if k == 8000:
-                #     print("##############################")
-                #     print("k8000 clock0_extended: ", clock0_extended)
-                #     print(_timetags[i])
-                #     print(tag)
-
-                # if k % 1000 == 0:
-                #     print(tag)
-                #     print("sub: ", sub)
                 dataTags[k] = tag
                 dataTagsR[k] = tagR
                 k = k + 1

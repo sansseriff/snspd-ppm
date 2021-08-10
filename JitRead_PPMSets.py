@@ -357,10 +357,29 @@ def make_ground_truth_hist(ground_truth_path,clock_period, sequence,resolution =
     ground_truth_hist, bins = np.histogram(times, bins=bins)
     return ground_truth_hist, bins
 
-def find_rough_offset(data,sequence,ground_truth_path,clock_period,resolution = 1000):
+
+def make_ground_truth_regions(ground_truth_path,clock_period, sequence):
+    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
+    times = np.array(
+        sequence_data["times"]) * 1e12 + dead_time_ps
+    regions = np.zeros((len(times),2))
+    laser_time = set_data["laser_time"]*1e12
+    regions[:,0] = times - (laser_time/2)
+    regions[:,1] = times + (laser_time/2)
+
+    return regions
+
+def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
+    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    clock_period = int(set_data["total_samples"] / (0.001 * set_data["sample_rate"]))
+
     real_data_bins = np.linspace(0, clock_period, resolution)
     real_data_hist, bins = np.histogram(data, bins=real_data_bins)
-    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+
+
+
 
     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
     dead_time_ps = dead_pulses*set_data["laser_time"]*1e12
@@ -375,7 +394,9 @@ def find_rough_offset(data,sequence,ground_truth_path,clock_period,resolution = 
     x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
     plt.figure()
     plt.plot(x,y)
-    print("max found at ", y.argmax())
+    title = f"convolution max found at {y.argmax()}"
+
+    plt.title(title)
     return -(y.argmax()/resolution)*clock_period
 
 def offset_tags(dual_data,offset,clock_period):
@@ -768,6 +789,14 @@ def section_list_manager(section_list):
         section_results.append(section_result)
 '''
 
+def find_first_dirtyClock(array):
+    q = 0
+    for item in array:
+        if item != 0:
+            q = q + 1
+        if q == 2:
+            return item
+
 
 def find_diff_regions(tags,extra = 3):
     # assumed there are a lot of zeros mixed in the list of tags.
@@ -809,9 +838,7 @@ def find_diff_regions(tags,extra = 3):
     for i, section in enumerate(sections):
         section[0] = idx_ref[section[0]]
         section[1] = idx_ref[section[1]]
-
-
-    return sections
+    return np.array(sections)
 
 
 def viz_current_decoding(data,gt_path, clock_period, cycle_number):
@@ -819,12 +846,16 @@ def viz_current_decoding(data,gt_path, clock_period, cycle_number):
     print("viz of cycle number: ", cycle_number)
     bins = np.linspace(0, clock_period, 500000)
     final_hist, final_bins = np.histogram(data, bins)
-    gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
-                                          resolution=500000)
-    plt.figure()
-    plt.plot(bins[1:], gthist * 200)
-    plt.plot(final_bins[1:], final_hist)
+    # gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
+    #                                       resolution=500000)
+    regions = make_ground_truth_regions(gt_path, clock_period, cycle_number)
+    fig,ax = plt.subplots(1,1)
+    #plt.plot(bins[1:], gthist * 200)
+    ax.plot(final_bins[1:], final_hist)
     title = "viz_current_decoding of cycle number: " + str(cycle_number)
+    for i in range(len(regions)):
+        ax.axvspan(regions[i,0],regions[i,1], facecolor = 'g', alpha = 0.3)
+
     plt.title(title)
 
 def runAnalysisJit(path_, file_, gt_path):
@@ -846,16 +877,12 @@ def runAnalysisJit(path_, file_, gt_path):
         timetags = data.getTimestamps()
 
 
-        step = len(channels)//120
-
-
+        print(channels[82000:82000 + 100])
         R = 2400000
-        # gt_path = "..//DataGen///TempSave//"
-        # print("some channels")
-        # print(channels[39099+100000:39099+200+100000])
-
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
+        print("lenght of countM: ", len(countM))
+        print("length of dirtyCLocks only clocks: ", len(dirtyClock[dirtyClock > 0]))
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
@@ -869,88 +896,117 @@ def runAnalysisJit(path_, file_, gt_path):
         calibrate_number = 0
         sequence_offset = 0
         SEQ = calibrate_number + sequence_offset
+        calibrate_section = section_list[calibrate_number]  # should always be the first section
+        m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]  # only use a small portion for cal.
+
+        #print("######### section 0: ", histClock[calibrate_section[1]-50:calibrate_section[1]])
+        #print("out of the loop, sections are: ", calibrate_section[0], calibrate_section[1])
 
 
-        #return s1, s2, s3
+        sorted = np.sort(histClock[calibrate_section[1]-10000:calibrate_section[1]])
+        locations = np.where(np.diff(sorted) > 100000)[0]
+        #print("locations: ", np.where(np.diff(sorted) > 100000))
+        dirty_clock_offset_1 = np.mean(sorted[locations[0] + 1:locations[1] - 1])
+        dirty_clock_offset_2 = np.mean(sorted[locations[1] + 1:-1])
 
-        calibrate_section = section_list[calibrate_number]
-        #m_data = dualData[calibrate_section[0]:calibrate_section[1]]
-        m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]
+        print("OPTION 1: ", dirty_clock_offset_1)
+        print("OPTION 2: ", dirty_clock_offset_2)
 
-        print("calibrate_section1: ", calibrate_section[1])
 
-        #print("shape of m_data: ", np.shape(m_data))
+
         CLOCK_PERIOD = 3200000
         # will input datatags that correspond only to individual sequences
-        offset = find_rough_offset(m_data, SEQ, gt_path, CLOCK_PERIOD, resolution=10000)
-
+        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=10000)
         m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
-
         sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
                                                         gt_path)
         start = time.time()
         slices, corr1, corr2 = find_pnr_correction(sequence_counts)
         end = time.time()
-        print("correction time: ", end - start)
+        #print("correction time: ", end - start)
 
         viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
 
         print("offset before the addition is: ",offset)
-        #imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
+
+        t1 = time.time()
+        imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
+
+
+        # continue using section_list, but adjust it to conform to
+        # the shorter imgData array.
+        print("offset tags time: ", time.time() - t1)
+
+        section_list = section_list - calibrate_section[1]
+
         # imgData is now shorter than dualData because it does not include the calibrate region.
 
-        #print("difference in length: ", len(dualData) - len(imgData))
-        #print("calibrate seciton 1: ", calibrate_section[1])
-        imgData_corrected, _ = apply_pnr_correction(dualData[calibrate_section[1]:], slices, corr1, corr2)
+        # new versions of these arrays that don't include the calibrate section
+        histClock = histClock[calibrate_section[1]:]
+        dirtyClock = dirtyClock[calibrate_section[1]:]
 
 
-        print(section_list[:40])
+        imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
 
         # loop over the whole image
         for i, slice in enumerate(section_list):
             if i == 0:  # fist section used only for calibration
                 continue
 
-            if i > 1:
+            if i > 7:
                 break
-            left = slice[0] - calibrate_section[1]
-            right= slice[1] - calibrate_section[1]
-            #current_data = dualData[left:right]
+            left = slice[0]
+            right = slice[1]
+
+            print("in the loop, sections are: ", left, right)
 
             print("left: ", left)
             print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
+            dirtyClock_offset = histClock[left:right]
+            dirtyClock_b = dirtyClock[left:right]
 
-            print("length of Clocks: ", len(Clocks))
-            print("length of dirtyClocks: ", len(dirtyClock))
-            print("lenght of dualData: ", len(dualData))
+
+
+            print("dirtyclock offset: ", dirtyClock_offset[:50])
+
+
+            sorted = np.sort(dirtyClock_offset)
+
+            locations = np.where(np.diff(sorted) > 100)[0] # this could still be a problem if the dirtyclock is near zero
+
+            dirty_clock_of1 = np.mean(sorted[locations[0] + 1:locations[1] - 1])
+            dirty_clock_of2 = np.mean(sorted[locations[1] + 1:-1])
+
+            dirty = find_first_dirtyClock(dirtyClock_offset)
+
+            print("THIS IS DIRTY: ", dirty)
+            # find all numbers around the same value as "dirty"
+            dirty_clock_of1 = np.mean(dirtyClock_offset[(dirtyClock_offset > (dirty - 100)) & (dirtyClock_offset < (dirty + 100))])
+
+
+
+            #print("dirtyclock: ", dirtyClock_b[:50])
+
+            #print("diffs: ", np.diff(dirtyClock_b[dirtyClock_b > 0])[:50])
+
+            #discrete_offset = np.mean(dirtyClock_offset[(dirtyClock_offset < 2000000) & (dirtyClock_offset > 0)]) #+ offset
+            #print("discrete offset: ", discrete_offset)
+
+            # print("length of Clocks: ", len(Clocks))
+            # print("length of dirtyClocks: ", len(dirtyClock))
+            # print("lenght of dualData: ", len(dualData))
             X = 0
-            current_data_corrected = offset_tags_single(current_data_corrected,offset + X,CLOCK_PERIOD)
+
+            current_data_corrected = offset_tags_single(current_data_corrected,(dirty_clock_of1 - dirty_clock_offset_1),CLOCK_PERIOD)
 
             viz_current_decoding(current_data_corrected,gt_path, CLOCK_PERIOD, i)
 
             decode_ppm(current_data_corrected, gt_path, i)
 
 
-
-        # now do an accurate scan
-
-        # I don't think accurate_delay_scan is necessary based on how the calibraton removes small delays.
-        #accurate_delay_scan(m_data_corrected,gt_path,calibrate_number+sequence_offset,50,CLOCK_PERIOD)
-        #test, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
-
-        # hist, bins = np.histogram(test,bins = np.arange(0,3200000))
-        # plt.figure()
-        # plt.plot(bins[1:],hist)
-
-        #decode_ppm(m_data_corrected, gt_path,SEQ)
-
-
-        # for i, section in enumerate(section_list[1:]):
-        #     # stuff for capturing data
-        #     continue
 
 
 
