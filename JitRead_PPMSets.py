@@ -666,12 +666,7 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     # times = np.array(
     #     sequence_data["times"]) * 1e12 + dead_time_ps
 
-
-    #print(sequence_data["times_sequence"])
     times = np.array(sequence_data["times"])
-    #print(times*1e12 + 10000)
-
-    #print(set_data['pulses_per_cycle'])
     laser_time = set_data['laser_time']*1e12  # in ps
 
     pulses_list = sequence_data["times_sequence"]
@@ -679,9 +674,6 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     # initial_time = dead_time_ps * 1e-12  # 250ns (for 20GHz)
     #initial_time = 0
     initial_time = 1000 # the 1000 is 1ns and matches an offset between times and times_sequence
-    # generated_times = []
-    # base_times = []
-    # symbols = []  # will be list of dicts
 
     start_symbol_time = []
     start_data_time = []
@@ -691,15 +683,6 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
     for pulse in pulses_list:
         time = initial_time + pulse*laser_time
-        # generated_times.append(time)
-        # base_times.append(initial_time)
-
-        # symbol_params = {"start_symbol_time":initial_time,
-        #                  "start_data_time": initial_time + dead_time_ps,
-        #                  "end_time": initial_time + (pulses_per_cycle - 1)*laser_time,
-        #                  "true_pulse":pulse,
-        #                  "laser_time": laser_time,
-        #                  }
 
         start_symbol_time.append(initial_time)
         start_data_time.append(initial_time + dead_time_ps)
@@ -708,11 +691,7 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
         initial_time = initial_time + pulses_per_cycle*laser_time
 
-   #print("START DATA TIME: ", start_data_time)
 
-    #print(generated_times)
-
-    #print(m_data_corrected[:40])
     tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
 
 
@@ -908,7 +887,7 @@ def find_diff_regions(tags,extra = 3):
     plt.plot(x, diffs)
     ind = np.argpartition(diffs, -100)[-100:]  # the indexes of the 100 largest numbers in diffs (from stack overflow)
     general_max = np.mean(diffs[ind])
-    print(np.mean(diffs[ind]))
+    #print(np.mean(diffs[ind]))
 
     ints = find_roots(x,diffs - general_max/2)
 
