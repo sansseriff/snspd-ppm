@@ -7,7 +7,7 @@ import numpy as np
 def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clock_mult = 1):
     j = 0
     k = 0
-    deriv = 8000  # increasing this gives less oscillations
+    deriv = 20000  # increasing this gives less oscillations
     prop = .0000000000001
     # deriv = 1800
     # prop = .000000000005

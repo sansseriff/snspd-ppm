@@ -284,7 +284,7 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
     X = (np.arange(len(counts))[1:]/len(counts))
     Y = np.array(counts)[1:] * 1e6
     IDX = np.array(index[:-1])
-    print(IDX[:40])
+    #print(IDX[:40])
     source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
 
     TOOLTIPS = [
@@ -383,7 +383,7 @@ def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
 
     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
     dead_time_ps = dead_pulses*set_data["laser_time"]*1e12
-    print("dead time in ps: ", dead_time_ps)
+    #print("dead time in ps: ", dead_time_ps)
 
     # !!!! I am adding dead_time_ps because I want to move the clock tag to:
     # the FIRST laser pulse of the LAST deadtime in the awg sequences.
@@ -415,10 +415,11 @@ def offset_tags(dual_data,offset,clock_period):
 
 def offset_tags_single(data, offset, clock_period):
     data = data - offset
-    greater_than_mask = (data > clock_period)
-    less_than_mask = (data < 0)
+    greater_than_mask = (data > clock_period + 50/2)
+    less_than_mask = (data < -50/2)
     data[greater_than_mask] = data[greater_than_mask] - clock_period
     data[less_than_mask] = data[less_than_mask] + clock_period
+
     return data
 
 
@@ -455,7 +456,7 @@ def generate_section_list(x,y,x_intercepts,idx):
     return section_list
 
 
-def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path):
+def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path,region_radius = 3000):
 
     """
     finds regions of time about 2ns wide where detector counts are known to be. Adds the counts from multiple regions
@@ -476,10 +477,10 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path)
 
     times = np.array(
         sequence_data["times"]) * 1e12 + dead_time_ps
-    print(times)
+    #print(times)
 
-    times_left = times - 1000
-    times_right = times + 1000  # 400ps window over which to do the calibration
+    times_left = times - region_radius
+    times_right = times + region_radius  # 400ps window over which to do the calibration
     #sequence_counts = np.array([])
     for i, (left, right, current_time) in enumerate(zip(times_left,times_right,times)):
         mask = (dual_data[:,0] > left) & (dual_data[:,0] < right)
@@ -662,6 +663,9 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
 
 
+    # times = np.array(
+    #     sequence_data["times"]) * 1e12 + dead_time_ps
+
 
     #print(sequence_data["times_sequence"])
     times = np.array(sequence_data["times"])
@@ -673,7 +677,8 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     pulses_list = sequence_data["times_sequence"]
     pulses_per_cycle = set_data['pulses_per_cycle']
     # initial_time = dead_time_ps * 1e-12  # 250ns (for 20GHz)
-    initial_time = 0
+    #initial_time = 0
+    initial_time = 1000 # the 1000 is 1ns and matches an offset between times and times_sequence
     # generated_times = []
     # base_times = []
     # symbols = []  # will be list of dicts
@@ -703,58 +708,111 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
         initial_time = initial_time + pulses_per_cycle*laser_time
 
-
+   #print("START DATA TIME: ", start_data_time)
 
     #print(generated_times)
 
-
+    #print(m_data_corrected[:40])
     tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
 
 
 
-    # q = 0
-    # stage = []
-    # for tag in tag_group_list[1]: #generalize later
-    #     symbol_start = start_symbol_time[q]
-    #     symbol_end = end_time[q]
-    #     data_start = start_data_time[q]
-    #     true_p = true_pulse[p]
-    #     if (tag > symbol_start) and (tag < symbol_end):
-    #         # process as PPM
-    #         stage.append(tag)
-    #         # for each tag that is found within one PPM symbol, stage increases in length by 1
-    #     else:
-    #         decode_symbol(stage, symbol_start, symbol_end, data_start, true_p)
-    #         # current tag must be in next PPM symbol.
-    #         # process the staged tags and move to next symbol.
-    #         q = q + 1
-    #         # move onto next PPM region
+
+    #######################
+    symbol_start = start_symbol_time[0]
+    symbol_end = end_time[0]
+    data_start = start_data_time[0]
+    true_p = true_pulse[0]
+    stage = []
+    q = 0
+    results = []
+
+    current_list = tag_group_list[2]
+    for i, tag in enumerate(current_list): #generalize later
+
+        if  tag > symbol_end + (laser_time/2):  # last slot (like 2047 or 1023) is at time symbol_end
+            # current stage is full. Process it.
+            results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+            stage = []
+            # prepare the next stage.
+            # does current tag fit in next stage or a later stage?
+            # look through remaining symbol regions
+            while 1:
+                q = q + 1
+                if q < len(pulses_list):
+                    symbol_start = start_symbol_time[q]
+                    symbol_end = end_time[q]
+                    data_start = start_data_time[q]
+                    true_p = true_pulse[q]
+                    if (tag > symbol_start - (laser_time/2)) and (tag < symbol_end + (laser_time/2)):
+                        # found new region to fill
+                        stage.append(tag)
+
+                        # if last tag, process it now before checking for more
+                        if i == len(current_list) - 1:
+                            results.append(
+                                decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+                        break
+                    else:
+                        # symbol passed with no data. append the vacuume identifier to results.
+                        results.append([-1,'D'])
+                else:
+                    # no more data found in this cycle.
+                    results.append([-1, 'D'])
+                    break
+
+        else:
+            stage.append(tag)
+
+            # if last tag, process it now before checking for more
+            if i == len(current_list) - 1:
+                results.append(
+                    decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+
+    still_missing = len(pulses_list) - len(results)
+    results.extend([[-1,'D']]*still_missing)
+    ###################
 
 
 
+    #print("ROBUST RESULT: ", results)
+            # move onto next PPM region
+    #print("tag group list 0: ", tag_group_list[0])
+    #print("tag group list 1: ", tag_group_list[1])
+    #print("tag group list 2: ", tag_group_list[2])
 
-    print(len(tag_group_list))
-    print(tag_group_list[1]) # don't use the 1st section, it may be partially filled.
+    #print(len(tag_group_list))
+    #print(tag_group_list[1]) # don't use the 1st section, it may be partially filled.
+    #print("LENGTH OF TAG GROUP LIST 1: ", len(tag_group_list[1]))
 
-    for i, tag in enumerate(tag_group_list[1]):
-        print(start_data_time[i])
-        tag = tag - start_data_time[i]
-        tag_group_list[1][i] = tag/50
-    # print(tag_group_list[33])
-    # print(tag_group_list[24])
-    # # print(tag_group_list[56])
-    # # print(tag_group_list[60])
-    # print(tag_group_list[13])
-    print(tag_group_list[1])
+    #print("TAG GROUP LIST: ", tag_group_list)
 
-    b = 0
-    for i in range(len(tag_group_list)):
-        if i > 0:
-            b = b + len(tag_group_list[i])
 
-    print("number of detections per awg sequence: ", b/(len(tag_group_list) - 1))
+    #print("TAG GROUP LIST 2: ", tag_group_list[2])
+    # for i, tag in enumerate(tag_group_list[2]):
+    #     if len(tag_group_list[2]) == len(start_data_time):
+    #         tag = tag - start_data_time[i]
+    #         tag_group_list[2][i] = round(tag/50)
+    #
+    # if len(tag_group_list[2]) == len(start_data_time):
+    #     print("DATA TEST: ", tag_group_list[2])
+    #     print("GT: ", true_pulse)
 
-    print("##################################")
+    tt = 0
+    for item in results:
+        if item[1] == 'A':
+            tt = tt + 1
+
+    return tt
+    #
+    # b = 0
+    # for i in range(len(tag_group_list)):
+    #     if i > 0:
+    #         b = b + len(tag_group_list[i])
+    #
+    # print("number of detections per awg sequence: ", b/(len(tag_group_list) - 1))
+    #
+    # print("##################################")
 
 
     # for base_time in base_times:
@@ -766,9 +824,39 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     # time is playing a role.
 
 
+#@njit
+def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time):
+    err = []
+    for tag in stage:
+        if (tag > data_start - (laser_time/2)) and (tag < symbol_end + (laser_time/2)):
+            # options A or B
+            solved = round((tag - data_start)/laser_time)
+            # if its correct and there haven't been
+            if solved == true_p: # and len(err) == 0:
+                if len(stage) > 1:
+                    for i,tag in enumerate(stage):
+                        stage[i] = round((tag - data_start)/laser_time)
+                    return [solved,'A',stage]
+                else:
+                    return [solved, 'A']
+            else:
+                err.append(solved)
 
-# @njit
-# def
+        else:
+            # must be a tag in the deadtime
+            # A, C, or E
+            err.append(-1)
+
+    for error in err:
+        if (error != -1) and len(err) > 1:
+            return [error,'C']
+        if (error != -1) and len(err) == 1:
+            return [error,'B']
+
+    # if here, all errors are in the deadtime
+    return [-1,'E']
+
+
 
 
 '''
@@ -789,13 +877,21 @@ def section_list_manager(section_list):
         section_results.append(section_result)
 '''
 
-def find_first_dirtyClock(array):
+def find_first_dirtyClock(array, num):
     q = 0
     for item in array:
         if item != 0:
             q = q + 1
-        if q == 2:
+        if q == num:
             return item
+
+def find_trailing_dirtyClock(array, num):
+    q = 0
+    for i in range(len(array)):
+        if array[-i] != 0:
+            q = q + 1
+        if q == num:
+            return array[-i]
 
 
 def find_diff_regions(tags,extra = 3):
@@ -820,11 +916,12 @@ def find_diff_regions(tags,extra = 3):
     plt.plot(ints, intersection_viz_y,'o',markersize=2)
 
     sections = []
+    #print("INTS: ", ints[:100])
     sections.append([0,int(math.floor(ints[0]))]) # the first big calibrate section
     for i in range(1,len(ints)-1):
-        if ints[i] - ints[i-1] < 10 and ints[i+1] - ints[i] > 100:
+        if ints[i] - ints[i-1] < 4 and ints[i+1] - ints[i] > 30:
             right = ints[i]
-        if ints[i] - ints[i-1] > 100 and ints[i+1] - ints[i] < 10:
+        if ints[i] - ints[i-1] > 30 and ints[i+1] - ints[i] < 4:
             left = ints[i]
             if ints[i - 1] == right:
                 sections.append([int(math.ceil(right)) + extra,int(math.floor(left)) - extra])
@@ -833,6 +930,8 @@ def find_diff_regions(tags,extra = 3):
 
     plt.plot(sections[35],[general_max/2,general_max/2], 'o', color = 'red')
     plt.plot(sections[100], [general_max / 2, general_max / 2], 'o', color='orange')
+
+    plt.plot(sections[307], [general_max / 2, general_max / 2], 'o', color='orange')
 
     # convert sections from the compressed array index to the expanded array index (the format with many zeros)
     for i, section in enumerate(sections):
@@ -843,7 +942,7 @@ def find_diff_regions(tags,extra = 3):
 
 def viz_current_decoding(data,gt_path, clock_period, cycle_number):
 
-    print("viz of cycle number: ", cycle_number)
+    #print("viz of cycle number: ", cycle_number)
     bins = np.linspace(0, clock_period, 500000)
     final_hist, final_bins = np.histogram(data, bins)
     # gthist, bins = make_ground_truth_hist(gt_path, clock_period, cycle_number,
@@ -855,6 +954,8 @@ def viz_current_decoding(data,gt_path, clock_period, cycle_number):
     title = "viz_current_decoding of cycle number: " + str(cycle_number)
     for i in range(len(regions)):
         ax.axvspan(regions[i,0],regions[i,1], facecolor = 'g', alpha = 0.3)
+        ax.axvline(x = regions[i, 0], color='g', alpha=0.8)
+        ax.axvline(x=regions[i, 1], color='g', alpha=0.8)
 
     plt.title(title)
 
@@ -865,30 +966,28 @@ def runAnalysisJit(path_, file_, gt_path):
 
     while file_reader.hasData():
         # Number of events to read at once
-        n_events = 200000000
+        n_events = 2000000000
 
         # Read at most n_events.
         # data is an instance of TimeTagStreamBuffer
         data = file_reader.getData(n_events)
-        print('Size of the returned data chunk: {:d} events\n'.format(data.size))
 
         # these are numpy arrays
         channels = data.getChannels()
         timetags = data.getTimestamps()
 
 
-        print(channels[82000:82000 + 100])
+
         R = 2400000
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
-        print("lenght of countM: ", len(countM))
-        print("length of dirtyCLocks only clocks: ", len(dirtyClock[dirtyClock > 0]))
+
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
 
         section_list = find_diff_regions(dirtyClock,extra = 5)
-
+        print("LENGTH OF SECTION LIST: ", len(section_list))
 
 
 
@@ -899,37 +998,30 @@ def runAnalysisJit(path_, file_, gt_path):
         calibrate_section = section_list[calibrate_number]  # should always be the first section
         m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]  # only use a small portion for cal.
 
-        #print("######### section 0: ", histClock[calibrate_section[1]-50:calibrate_section[1]])
-        #print("out of the loop, sections are: ", calibrate_section[0], calibrate_section[1])
 
+        offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]]
+        dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
 
-        sorted = np.sort(histClock[calibrate_section[1]-10000:calibrate_section[1]])
-        locations = np.where(np.diff(sorted) > 100000)[0]
-        #print("locations: ", np.where(np.diff(sorted) > 100000))
-        dirty_clock_offset_1 = np.mean(sorted[locations[0] + 1:locations[1] - 1])
-        dirty_clock_offset_2 = np.mean(sorted[locations[1] + 1:-1])
-
-        print("OPTION 1: ", dirty_clock_offset_1)
-        print("OPTION 2: ", dirty_clock_offset_2)
-
+        # find all numbers around the same value as "dirty"
+        dirty_clock_offset_1 = np.mean(
+            offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
 
 
         CLOCK_PERIOD = 3200000
         # will input datatags that correspond only to individual sequences
-        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=10000)
+        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=1000)
         m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
         sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
-                                                        gt_path)
+                                                        gt_path,region_radius = 5000)
         start = time.time()
         slices, corr1, corr2 = find_pnr_correction(sequence_counts)
         end = time.time()
-        #print("correction time: ", end - start)
 
         viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
 
-        print("offset before the addition is: ",offset)
+        #print("offset before the addition is: ",offset)
 
         t1 = time.time()
         imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
@@ -937,7 +1029,7 @@ def runAnalysisJit(path_, file_, gt_path):
 
         # continue using section_list, but adjust it to conform to
         # the shorter imgData array.
-        print("offset tags time: ", time.time() - t1)
+        #print("offset tags time: ", time.time() - t1)
 
         section_list = section_list - calibrate_section[1]
 
@@ -951,42 +1043,39 @@ def runAnalysisJit(path_, file_, gt_path):
         imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
 
         # loop over the whole image
-        for i, slice in enumerate(section_list):
+        t1 = time.time()
+        TTS = []
+        for i, slice in enumerate(section_list[:-1]):
             if i == 0:  # fist section used only for calibration
                 continue
 
-            if i > 7:
-                break
+            # if i > 20:
+            #     break
+            #print("ITERATION: ", i)
             left = slice[0]
             right = slice[1]
 
-            print("in the loop, sections are: ", left, right)
+            #print("in the loop, sections are: ", left, right)
 
-            print("left: ", left)
-            print("right: ", right)
+            #print("left: ", left)
+            #print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
             dirtyClock_offset = histClock[left:right]
             dirtyClock_b = dirtyClock[left:right]
 
 
 
-            print("dirtyclock offset: ", dirtyClock_offset[:50])
+            #print("dirtyclock offset: ", dirtyClock_offset[:50])
 
 
             sorted = np.sort(dirtyClock_offset)
 
-            locations = np.where(np.diff(sorted) > 100)[0] # this could still be a problem if the dirtyclock is near zero
+            # locations = np.where(np.diff(sorted) > 100)[0] # this could still be a problem if the dirtyclock is near zero
 
-            dirty_clock_of1 = np.mean(sorted[locations[0] + 1:locations[1] - 1])
-            dirty_clock_of2 = np.mean(sorted[locations[1] + 1:-1])
-
-            dirty = find_first_dirtyClock(dirtyClock_offset)
-
-            print("THIS IS DIRTY: ", dirty)
-            # find all numbers around the same value as "dirty"
-            dirty_clock_of1 = np.mean(dirtyClock_offset[(dirtyClock_offset > (dirty - 100)) & (dirtyClock_offset < (dirty + 100))])
-
-
+            sorted = sorted[sorted != 0]
+            locations = np.where(np.diff(sorted) > 100)[0] # would only expect diff to have one element
+            dirty_clock_of1 = np.mean(sorted[0:locations[0] - 1])
+            dirty_clock_of2 = np.mean(sorted[locations[0] + 1:])
 
             #print("dirtyclock: ", dirtyClock_b[:50])
 
@@ -999,15 +1088,29 @@ def runAnalysisJit(path_, file_, gt_path):
             # print("length of dirtyClocks: ", len(dirtyClock))
             # print("lenght of dualData: ", len(dualData))
             X = 0
+            offset_adjustment_1 = round((dirty_clock_of1 - dirty_clock_offset_1)/200)*200
+            offset_adjustment_2 = round((dirty_clock_of2 - dirty_clock_offset_1)/200)*200
 
-            current_data_corrected = offset_tags_single(current_data_corrected,(dirty_clock_of1 - dirty_clock_offset_1),CLOCK_PERIOD)
+            #print("OFFSET ADJ: ", offset_adjustment_1)
 
-            viz_current_decoding(current_data_corrected,gt_path, CLOCK_PERIOD, i)
+            current_data_corrected_1 = offset_tags_single(current_data_corrected,offset_adjustment_1,CLOCK_PERIOD)
+            current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
 
-            decode_ppm(current_data_corrected, gt_path, i)
+            #viz_current_decoding(current_data_corrected_2,gt_path, CLOCK_PERIOD, i)
+            #viz_current_decoding(current_data_corrected_2, gt_path, CLOCK_PERIOD, i)
 
+            TT1 = decode_ppm(current_data_corrected_1, gt_path, i)
+            TT2 = decode_ppm(current_data_corrected_2, gt_path, i)
 
+            if TT1 > TT2:
+                TTS.append(TT1)
+            if TT2 > TT1:
+                TTS.append(TT2)
+            #print()
 
+        print("loop time: ", time.time() - t1)
+        TTS = np.array(TTS)
+        print("ACCURACY: ", np.mean(TTS)/9)
 
 
 
@@ -1050,7 +1153,7 @@ path = "..//..//July29//"
 #file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
 #file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-file = "340s_.002_.050_july29_picScan_18.0.1.ttbin"
+file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
 gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
 #s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
 s1,s2, s4 = runAnalysisJit(path, file, gt_path)
