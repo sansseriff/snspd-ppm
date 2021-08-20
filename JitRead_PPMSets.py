@@ -54,11 +54,11 @@ def checkLocking(Clocks, RecoveredClocks,mpl = False):
     diffs = Clocks - basis
     diffsRecovered = RecoveredClocks - basis
     s = 12800000/1e12
-    print("s is this: ", s)
-    print(len(diffs))
+    # print("s is this: ", s)
+    # print(len(diffs))
     x = np.arange(0, len(diffs))*s
 
-    print(np.max(x))
+    # print(np.max(x))
 
     if mpl:
         plt.figure()
@@ -103,7 +103,7 @@ def checkLocking(Clocks, RecoveredClocks,mpl = False):
     # ax[1].plot(x2, norm.pdf(x2, mean, sigma), label=lbl)
     # ax[1].legend()
     s2.line(x2, norm.pdf(x2, mean, sigma), color = Colors['black'],legend_label = lbl)
-    print("this is the length of the plotted array: ", len(diffs))
+    # print("this is the length of the plotted array: ", len(diffs))
 
     return s1,s2
 
@@ -135,8 +135,8 @@ def checkLockingEffect(dataTags, dataTagsR, xlim=-1, ylim=-1):
 
 @njit
 def countRateMonitor_b(timetaggs, reduc_factor):
-    print("legnth of passed array: ", len(timetaggs))
-    print("first in array: ", timetaggs[0])
+    # print("legnth of passed array: ", len(timetaggs))
+    # print("first in array: ", timetaggs[0])
     for i in range(len(timetaggs)):
         if timetaggs[i] > 0:
             break
@@ -156,7 +156,7 @@ def countRateMonitor_b(timetaggs, reduc_factor):
     #timeR = timetaggs[0] + delta_time
     timetaggs = timetaggs #- timetaggs[i] + 1
     # basic binning in chunks of time
-    print(timetaggs[10000:10010])
+    # print(timetaggs[10000:10010])
     times = []
     q = 0
     zero_counter = 0
@@ -178,7 +178,7 @@ def countRateMonitor_b(timetaggs, reduc_factor):
         times.append(current_time)
         counts.append(current_sum/delta_time)
         index.append(q)
-    print("this is bla: ", bla)
+    # print("this is bla: ", bla)
     #return counts, delta_time, index
     return counts, times, index, rm_region
 
@@ -207,9 +207,9 @@ def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
             counts.append(current/t_elapsed)
             index.append(idx)
             current = 0
-    print("option 1: ", len(channels[channels == channel_check]))
-    print("option 1: ", len(channels[channels == -14]))
-    print("option 2: ", index[-1])
+    #print("option 1: ", len(channels[channels == channel_check]))
+    #print("option 1: ", len(channels[channels == -14]))
+    #print("option 2: ", index[-1])
     return counts, delta_time, index
 
 
@@ -225,12 +225,12 @@ def analyze_count_rate_b(timetags, reduc):
     index = np.array(index)
 
     # cut out the long regions of zeros for easier plotting
-    print("sum of zero counter: ", np.sum(rm_region))
+    #print("sum of zero counter: ", np.sum(rm_region))
     mask = np.invert(rm_region.astype(bool))
     times = times[mask]
     counts = counts[mask]
     index = index[mask]
-    print("this is length of counts: ", len(counts))
+    #print("this is length of counts: ", len(counts))
     plt.figure()
     plt.plot(np.arange(len(rm_region)),rm_region)
 
@@ -261,7 +261,7 @@ def analyze_count_rate_b(timetags, reduc):
 
     #mean = np.mean(Y)
     mean = 3000000
-    print("the mean is: ", mean)
+    #print("the mean is: ", mean)
     Y2 = find_roots(X,Y - mean)
 
     marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + mean))
@@ -487,7 +487,7 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path,
         counts = dual_data[mask] - current_time  # bring the counts to to near-zero
         l_bound = left - current_time
         r_bound = right - current_time
-        print(l_bound)
+        #print(l_bound)
         if i == 0:
             sequence_counts = counts
         else:
@@ -606,65 +606,10 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
         print("iterations: ", i)
 
 
-
-# def accurate_delay_scan(m_data_corrected,gt_path,sequence,slot_width,clock_period):
-#     sequence_data, set_data = import_ground_truth(gt_path, sequence)
-#     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
-#     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
-#
-#     times = np.array(
-#         sequence_data["times"]) * 1e12 + dead_time_ps # adding 10 ns
-#
-#     # time_ranges = []
-#     #
-#     # sums = []
-#     # for j in range(-600,600):
-#     #     m = False
-#     #     for i,time in enumerate(times):
-#     #         time_ranges.append([time - slot_width/2,time + slot_width/2])
-#     #         right = time - slot_width/2
-#     #         left = time + slot_width/2
-#     #         m = ((m_data_corrected > right) & (m_data_corrected < left))
-#     #         this = 0
-#     #     sums.append(m.sum())
-#     # plt.figure()
-#     # plt.plot(np.arange(len(sums)),sums)
-#
-#
-#     # below is not updated
-#     kernel = np.zeros(clock_period + 10000)
-#     for time in times:
-#         right = int(time - slot_width / 2)
-#         left = int(time + slot_width / 2)
-#         kernel[right:left] = 1
-#
-#     hist,bins = np.histogram(m_data_corrected,bins = np.arange(clock_period + 10001))
-#     print("lenght of kernel", len(kernel))
-#     print("length of hist: ", len(hist))
-#
-#     plt.figure()
-#     plt.plot(bins[1:],hist)
-#     plt.plot(bins[1:],kernel*700)
-#     plt.title("is this visible?")
-#
-#
-#     x,y = jit_convolve_limited(hist.astype(float), kernel.astype(float), -200, 200)
-#     plt.figure()
-#     plt.plot(x,y)
-#     plt.title("convolution")
-#     print("max of y: ", np.argmax(y))
-
-
-
-
-def decode_ppm(m_data_corrected, gt_path, sequence):
+def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
-
-
-    # times = np.array(
-    #     sequence_data["times"]) * 1e12 + dead_time_ps
 
     times = np.array(sequence_data["times"])
     laser_time = set_data['laser_time']*1e12  # in ps
@@ -672,7 +617,7 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     pulses_list = sequence_data["times_sequence"]
     pulses_per_cycle = set_data['pulses_per_cycle']
     # initial_time = dead_time_ps * 1e-12  # 250ns (for 20GHz)
-    #initial_time = 0
+    # initial_time = 0
     initial_time = 1000 # the 1000 is 1ns and matches an offset between times and times_sequence
 
     start_symbol_time = []
@@ -691,11 +636,7 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
 
         initial_time = initial_time + pulses_per_cycle*laser_time
 
-
     tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
-
-
-
 
     #######################
     symbol_start = start_symbol_time[0]
@@ -706,52 +647,57 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
     q = 0
     results = []
 
-    current_list = tag_group_list[2]
-    for i, tag in enumerate(current_list): #generalize later
+    #####
+    Results = [0]*len(res_idx)
+    for x, idx in enumerate(res_idx):
+        current_list = tag_group_list[idx]
+        results = []
+        ######
+        for i, tag in enumerate(current_list): #generalize later
 
-        if  tag > symbol_end + (laser_time/2):  # last slot (like 2047 or 1023) is at time symbol_end
-            # current stage is full. Process it.
-            results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
-            stage = []
-            # prepare the next stage.
-            # does current tag fit in next stage or a later stage?
-            # look through remaining symbol regions
-            while 1:
-                q = q + 1
-                if q < len(pulses_list):
-                    symbol_start = start_symbol_time[q]
-                    symbol_end = end_time[q]
-                    data_start = start_data_time[q]
-                    true_p = true_pulse[q]
-                    if (tag > symbol_start - (laser_time/2)) and (tag < symbol_end + (laser_time/2)):
-                        # found new region to fill
-                        stage.append(tag)
+            if  tag > symbol_end + (laser_time/2):  # last slot (like 2047 or 1023) is at time symbol_end
+                # current stage is full. Process it.
+                results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+                stage = []
+                # prepare the next stage.
+                # does current tag fit in next stage or a later stage?
+                # look through remaining symbol regions
+                while 1:
+                    q = q + 1
+                    if q < len(pulses_list):
+                        symbol_start = start_symbol_time[q]
+                        symbol_end = end_time[q]
+                        data_start = start_data_time[q]
+                        true_p = true_pulse[q]
+                        if (tag > symbol_start - (laser_time/2)) and (tag < symbol_end + (laser_time/2)):
+                            # found new region to fill
+                            stage.append(tag)
 
-                        # if last tag, process it now before checking for more
-                        if i == len(current_list) - 1:
-                            results.append(
-                                decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
-                        break
+                            # if last tag, process it now before checking for more
+                            if i == len(current_list) - 1:
+                                results.append(
+                                    decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+                            break
+                        else:
+                            # symbol passed with no data. append the vacuume identifier to results.
+                            results.append([-1,'D'])
                     else:
-                        # symbol passed with no data. append the vacuume identifier to results.
-                        results.append([-1,'D'])
-                else:
-                    # no more data found in this cycle.
-                    results.append([-1, 'D'])
-                    break
+                        # no more data found in this cycle.
+                        results.append([-1, 'D'])
+                        break
 
-        else:
-            stage.append(tag)
+            else:
+                stage.append(tag)
 
-            # if last tag, process it now before checking for more
-            if i == len(current_list) - 1:
-                results.append(
-                    decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+                # if last tag, process it now before checking for more
+                if i == len(current_list) - 1:
+                    results.append(
+                        decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
 
-    still_missing = len(pulses_list) - len(results)
-    results.extend([[-1,'D']]*still_missing)
-    ###################
-
+        still_missing = len(pulses_list) - len(results)
+        results.extend([[-1,'D']]*still_missing)
+        ###################
+        Results[x] = results
 
 
     #print("ROBUST RESULT: ", results)
@@ -782,25 +728,10 @@ def decode_ppm(m_data_corrected, gt_path, sequence):
         if item[1] == 'A':
             tt = tt + 1
 
-    return tt
-    #
-    # b = 0
-    # for i in range(len(tag_group_list)):
-    #     if i > 0:
-    #         b = b + len(tag_group_list[i])
-    #
-    # print("number of detections per awg sequence: ", b/(len(tag_group_list) - 1))
-    #
-    # print("##################################")
+    #return results, tt
+    #print(Results)
+    return Results, tt
 
-
-    # for base_time in base_times:
-    #     arr =
-
-
-    # need to be able to identify a number for each PPM symbol.
-    # might also be nice to compare fidelity of the same symbol over multiple sequences. To see if dead
-    # time is playing a role.
 
 
 #@njit
@@ -815,7 +746,7 @@ def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_tim
                 if len(stage) > 1:
                     for i,tag in enumerate(stage):
                         stage[i] = round((tag - data_start)/laser_time)
-                    return [solved,'A',stage]
+                    return [solved,'A'] #,stage]
                 else:
                     return [solved, 'A']
             else:
@@ -1024,6 +955,7 @@ def runAnalysisJit(path_, file_, gt_path):
         # loop over the whole image
         t1 = time.time()
         TTS = []
+        results = [[]] # inside should match res_idx
         for i, slice in enumerate(section_list[:-1]):
             if i == 0:  # fist section used only for calibration
                 continue
@@ -1070,21 +1002,23 @@ def runAnalysisJit(path_, file_, gt_path):
             offset_adjustment_1 = round((dirty_clock_of1 - dirty_clock_offset_1)/200)*200
             offset_adjustment_2 = round((dirty_clock_of2 - dirty_clock_offset_1)/200)*200
 
-            #print("OFFSET ADJ: ", offset_adjustment_1)
-
             current_data_corrected_1 = offset_tags_single(current_data_corrected,offset_adjustment_1,CLOCK_PERIOD)
             current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
 
-            #viz_current_decoding(current_data_corrected_2,gt_path, CLOCK_PERIOD, i)
-            #viz_current_decoding(current_data_corrected_2, gt_path, CLOCK_PERIOD, i)
-
-            TT1 = decode_ppm(current_data_corrected_1, gt_path, i)
-            TT2 = decode_ppm(current_data_corrected_2, gt_path, i)
+            results1, TT1 = decode_ppm(current_data_corrected_1, gt_path, i, res_idx = [3])
+            results2, TT2 = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
 
             if TT1 > TT2:
                 TTS.append(TT1)
+                #results.extend(results1)
+
+                for res, master_res in zip(results1, results):
+                    master_res.extend(res)
             if TT2 > TT1:
                 TTS.append(TT2)
+                # results.extend(results2)
+                for res, master_res in zip(results2, results):
+                    master_res.extend(res)
             #print()
 
         print("loop time: ", time.time() - t1)
@@ -1121,20 +1055,22 @@ def runAnalysisJit(path_, file_, gt_path):
         #########
 
 
+        graphs = [s1, s2, s4]
+        return results, graphs
 
-        return s1, s2, s4
 
 
-#path = "..//..//July27//"
-path = "..//..//July29//"
-#file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
+if __name__ == "__main__":
+    #path = "..//..//July27//"
+    path = "..//..//July29//"
+    #file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
-#file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
-#file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
-#file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
-gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
-#s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
-s1,s2, s4 = runAnalysisJit(path, file, gt_path)
-#show(column(s1, s2, s3, s4))
-show(column(s1, s2, s4))
+    #file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
+    #file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
+    #file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
+    file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
+    gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
+    #s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
+    results, graphs = runAnalysisJit(path, file, gt_path)
+
+    show(column(graphs[0],graphs[1],graphs[2]))
