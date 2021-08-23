@@ -35,7 +35,7 @@ from bokeh.models.markers import Circle
 
 from bokeh.models import ColumnDataSource
 
-#Colors, palette = phd.viz.phd_style( data_width = 0.3, grid = True, axese_width=0.3, text = 2)
+# Colors, palette = phd.viz.phd_style( data_width = 0.3, grid = True, axese_width=0.3, text = 2)
 matplotlib.rcParams['figure.dpi'] = 150
 doc = curdoc()
 Colors, pallet = viz.bokeh_theme(return_color_list=True)
@@ -117,8 +117,6 @@ def checkLockingEffect(dataTags, dataTagsR, xlim=-1, ylim=-1):
     if ylim == -1:
         ylim = np.max(dataTags[L:])
 
-    #print("data tags R", dataTagsR[:50])
-    #print("data tags ", dataTags[:50])
     setBins = np.arange(xlim, ylim, 1)
     hist, bin_edges = np.histogram(dataTags[L:], setBins)
     histRough, bins_edges = np.histogram(dataTagsR[L:], setBins)
@@ -144,16 +142,8 @@ def countRateMonitor_b(timetaggs, reduc_factor):
         if timetaggs[-j] > 0:
             break
     delta_time = (timetaggs[-j] - timetaggs[i])//reduc_factor
-    # print("original time: ", timetaggs[-j] - timetaggs[i])
-    # print("this is i: ", i)
-    # print("this is j: ", j)
-    # print("delta time: ", delta_time)
-    # print("ending time: ", timetaggs[-j])
-    # print("beginning time: ", timetaggs[i])
-    # delta_time is the bin size
     counts = []
     index = []  # for slicing the data array in another parent function
-    #timeR = timetaggs[0] + delta_time
     timetaggs = timetaggs #- timetaggs[i] + 1
     # basic binning in chunks of time
     # print(timetaggs[10000:10010])
@@ -179,7 +169,6 @@ def countRateMonitor_b(timetaggs, reduc_factor):
         counts.append(current_sum/delta_time)
         index.append(q)
     # print("this is bla: ", bla)
-    #return counts, delta_time, index
     return counts, times, index, rm_region
 
 
@@ -207,9 +196,6 @@ def countRateMonitor(timetaggs,channels, channel_check,reduc_factor):
             counts.append(current/t_elapsed)
             index.append(idx)
             current = 0
-    #print("option 1: ", len(channels[channels == channel_check]))
-    #print("option 1: ", len(channels[channels == -14]))
-    #print("option 2: ", index[-1])
     return counts, delta_time, index
 
 
@@ -225,12 +211,10 @@ def analyze_count_rate_b(timetags, reduc):
     index = np.array(index)
 
     # cut out the long regions of zeros for easier plotting
-    #print("sum of zero counter: ", np.sum(rm_region))
     mask = np.invert(rm_region.astype(bool))
     times = times[mask]
     counts = counts[mask]
     index = index[mask]
-    #print("this is length of counts: ", len(counts))
     plt.figure()
     plt.plot(np.arange(len(rm_region)),rm_region)
 
@@ -238,12 +222,9 @@ def analyze_count_rate_b(timetags, reduc):
 
     Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
 
-    #s3.line((np.arange(len(counts))[1:]/(1e12*len(counts)))*(timetags[-1] - timetags[0]),np.array(counts)[1:]*1e6)
-
     X = np.array(times)  # (np.arange(len(counts))[1:]/len(counts))
     Y = np.array(counts) * 1e6
     IDX = np.array(index)
-    #print(IDX[:40])
     source = ColumnDataSource(data = dict(x=X, y=Y, idx=IDX))
 
     TOOLTIPS = [
@@ -259,9 +240,7 @@ def analyze_count_rate_b(timetags, reduc):
     s3.yaxis.axis_label = "count rate (MCounts/s)"
     s3.line('x','y',source = source)
 
-    #mean = np.mean(Y)
     mean = 3000000
-    #print("the mean is: ", mean)
     Y2 = find_roots(X,Y - mean)
 
     marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + mean))
@@ -269,7 +248,6 @@ def analyze_count_rate_b(timetags, reduc):
     glyph = Circle(x="x", y="y", size=3, line_color='red', fill_color="white", line_width=3)
     s3.add_glyph(marker_source, glyph)
 
-    #section_list = generate_section_list(X, Y, Y2,IDX)
     section_list = []
 
     return s3, section_list
@@ -278,8 +256,6 @@ def analyze_count_rate_b(timetags, reduc):
 def analyze_count_rate(timetags, channels, checkChan, reduc):
     counts, delta_time, index = countRateMonitor(timetags, channels, checkChan, reduc)
     Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
-
-    #s3.line((np.arange(len(counts))[1:]/(1e12*len(counts)))*(timetags[-1] - timetags[0]),np.array(counts)[1:]*1e6)
 
     X = (np.arange(len(counts))[1:]/len(counts))
     Y = np.array(counts)[1:] * 1e6
@@ -299,11 +275,9 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
     s3.yaxis.axis_label = "count rate (MCounts/s)"
     s3.line('x','y',source = source)
 
-
     Y2 = find_roots(X,Y - 0.5)
 
     marker_source = ColumnDataSource(data = dict(x = Y2,y = np.zeros(len(Y2)) + 2))
-    #print(Y2*len(X))
     glyph = Circle(x="x", y="y", size=3, line_color='red', fill_color="white", line_width=3)
     s3.add_glyph(marker_source, glyph)
 
@@ -477,11 +451,9 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path,
 
     times = np.array(
         sequence_data["times"]) * 1e12 + dead_time_ps
-    #print(times)
 
     times_left = times - region_radius
     times_right = times + region_radius  # 400ps window over which to do the calibration
-    #sequence_counts = np.array([])
     for i, (left, right, current_time) in enumerate(zip(times_left,times_right,times)):
         mask = (dual_data[:,0] > left) & (dual_data[:,0] < right)
         counts = dual_data[mask] - current_time  # bring the counts to to near-zero
@@ -493,10 +465,6 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path,
         else:
             sequence_counts = np.concatenate((sequence_counts,counts))
 
-
-
-
-
     bins = np.arange(int(l_bound),int(r_bound))
 
     hist, bins = np.histogram(sequence_counts[:,0],bins = bins)
@@ -505,8 +473,6 @@ def generate_PNR_analysis_regions(dual_data, cycle_number,clock_period, gt_path,
     plt.figure()
     plt.plot(bins[1:],hist)
     plt.plot(bins[1:], hist2)
-
-
 
     return sequence_counts
 
@@ -550,7 +516,6 @@ def viz_counts_and_correction(counts,slices,corr1,corr2):
     ax[1].plot(slices[:-1], corr2, color='k')
 
 
-
 def apply_pnr_correction(dual_data, slices, corr1, corr2,seperated_arrays = False):
     corrected1 = np.zeros(len(dual_data))
     corrected2 = np.zeros(len(dual_data))
@@ -573,6 +538,7 @@ def apply_pnr_correction(dual_data, slices, corr1, corr2,seperated_arrays = Fals
         return corrected1, corrected2, array_list1, array_list2
     else:
         return corrected1, corrected2
+
 
 def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False):
     if hist_set:
@@ -605,6 +571,40 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
 
         print("iterations: ", i)
 
+@njit
+def group_list_generator(tags):
+    """
+    this takes in a set of tags that all correspond to the same awg sequence. However, the set of tags is from many
+    repetitions of that sequence. Objective is to seperate out groups of tags that were recorded from one repetition
+    of the awg. For minimal loss, this can be done by seperating the tags at locations where the time differnce bewteen
+    tags is negative (because they are in histogram-space). But when there's high loss, I need to identify when
+    some reps of the awg result in zero detections. This fucntion adds emtpy numpy arrays to the output list to signify
+    those events.
+    """
+    group_list = []
+    old_tag = tags[0]//2 # just ensure old_tag is larger to start
+    i = -1
+    chunk = np.zeros(100)
+    diffs = [] ###
+    for tag in tags:
+        diff = tag - old_tag
+        if diff < 0:
+            diffs.append(diff) ###
+            group_list.append(chunk[:i])
+            i = 0
+            chunk = np.zeros(100)
+            chunk[0] = tag
+            i = i + 1
+        else:
+            if i < 100:
+                chunk[i] = tag
+                i = i + 1
+            else:
+                continue
+        old_tag = tag
+
+    return group_list, diffs ###
+
 
 def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
@@ -625,7 +625,6 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
     end_time = []
     true_pulse = []
 
-
     for pulse in pulses_list:
         time = initial_time + pulse*laser_time
 
@@ -636,7 +635,17 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
 
         initial_time = initial_time + pulses_per_cycle*laser_time
 
-    tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
+    #tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
+    tag_group_list, diffs = group_list_generator(m_data_corrected)
+
+
+
+    # if sequence == 100 or sequence == 34 or sequence == 120 or sequence == 300:
+    #     print(tag_group_list)
+    #     plt.figure()
+    #     plt.plot(np.arange(len(diffs)), diffs)
+    #     plt.title("this is for sequence 32")
+
 
     #######################
     symbol_start = start_symbol_time[0]
@@ -654,8 +663,11 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         results = []
         ######
         for i, tag in enumerate(current_list): #generalize later
-
-            if  tag > symbol_end + (laser_time/2):  # last slot (like 2047 or 1023) is at time symbol_end
+            if tag > end_time[-1]:
+                # tag is in extra region at the end of the sequence that doesn't corresponds to any data
+                break
+            if  tag > symbol_end + (laser_time/2) and len(stage) > 0:  # last slot (like 2047 or 1023) is at time symbol_end
+                # incude the len(stage) part so that we don't try to decode empty stage if 1st tag of sequence not found
                 # current stage is full. Process it.
                 results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
                 stage = []
@@ -697,23 +709,39 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         still_missing = len(pulses_list) - len(results)
         results.extend([[-1,'D']]*still_missing)
         ###################
+
+        e = 0
+        for item in results:
+            if item[1] == 'E':
+                e = e + 1
+
+        if len(current_list) < e and e > 6:
+            print(results)
+            print(current_list)
+            viz_current_decoding(current_list, gt_path, 3200000, sequence, start = start_data_time, end = end_time)
+            print("##################################")
+
+
+        # if len(results) != 9:
+        #     print(current_list)
+        #     viz_current_decoding(current_list, gt_path, 3200000, sequence)
+        #     print("symbol end: ", symbol_end)
         Results[x] = results
 
 
-    #print("ROBUST RESULT: ", results)
+    # print("ROBUST RESULT: ", results)
             # move onto next PPM region
-    #print("tag group list 0: ", tag_group_list[0])
-    #print("tag group list 1: ", tag_group_list[1])
-    #print("tag group list 2: ", tag_group_list[2])
+    # print("tag group list 0: ", tag_group_list[0])
+    # print("tag group list 1: ", tag_group_list[1])
+    # print("tag group list 2: ", tag_group_list[2])
 
-    #print(len(tag_group_list))
-    #print(tag_group_list[1]) # don't use the 1st section, it may be partially filled.
-    #print("LENGTH OF TAG GROUP LIST 1: ", len(tag_group_list[1]))
+    # print(len(tag_group_list))
+    # print(tag_group_list[1]) # don't use the 1st section, it may be partially filled.
+    # print("LENGTH OF TAG GROUP LIST 1: ", len(tag_group_list[1]))
 
-    #print("TAG GROUP LIST: ", tag_group_list)
+    # print("TAG GROUP LIST: ", tag_group_list)
 
-
-    #print("TAG GROUP LIST 2: ", tag_group_list[2])
+    # print("TAG GROUP LIST 2: ", tag_group_list[2])
     # for i, tag in enumerate(tag_group_list[2]):
     #     if len(tag_group_list[2]) == len(start_data_time):
     #         tag = tag - start_data_time[i]
@@ -728,16 +756,13 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         if item[1] == 'A':
             tt = tt + 1
 
-    #return results, tt
-    #print(Results)
-    return Results, tt
+    return Results, tt, diffs
 
 
-
-#@njit
 def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time):
     err = []
     for tag in stage:
+
         if (tag > data_start - (laser_time/2)) and (tag < symbol_end + (laser_time/2)):
             # options A or B
             solved = round((tag - data_start)/laser_time)
@@ -746,7 +771,7 @@ def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_tim
                 if len(stage) > 1:
                     for i,tag in enumerate(stage):
                         stage[i] = round((tag - data_start)/laser_time)
-                    return [solved,'A'] #,stage]
+                    return [solved,'A'] # ,stage]
                 else:
                     return [solved, 'A']
             else:
@@ -787,6 +812,7 @@ def section_list_manager(section_list):
         section_results.append(section_result)
 '''
 
+
 def find_first_dirtyClock(array, num):
     q = 0
     for item in array:
@@ -794,6 +820,7 @@ def find_first_dirtyClock(array, num):
             q = q + 1
         if q == num:
             return item
+
 
 def find_trailing_dirtyClock(array, num):
     q = 0
@@ -817,6 +844,10 @@ def find_diff_regions(tags,extra = 3):
     x = np.arange(len(diffs))
     plt.plot(x, diffs)
     ind = np.argpartition(diffs, -100)[-100:]  # the indexes of the 100 largest numbers in diffs (from stack overflow)
+
+    ind1000 = np.sort(np.argpartition(diffs, -1000)[-1000:])[:30]
+    print("30 smallest of 1000 largest: ", diffs[ind1000])
+
     general_max = np.mean(diffs[ind])
     #print(np.mean(diffs[ind]))
 
@@ -850,7 +881,7 @@ def find_diff_regions(tags,extra = 3):
     return np.array(sections)
 
 
-def viz_current_decoding(data,gt_path, clock_period, cycle_number):
+def viz_current_decoding(data,gt_path, clock_period, cycle_number, start = None, end = None):
 
     #print("viz of cycle number: ", cycle_number)
     bins = np.linspace(0, clock_period, 500000)
@@ -866,13 +897,15 @@ def viz_current_decoding(data,gt_path, clock_period, cycle_number):
         ax.axvspan(regions[i,0],regions[i,1], facecolor = 'g', alpha = 0.3)
         ax.axvline(x = regions[i, 0], color='g', alpha=0.8)
         ax.axvline(x=regions[i, 1], color='g', alpha=0.8)
+        if end is not None and start is not None:
+            ax.axvspan(start[i], end[i], facecolor = 'r', alpha = 0.3)
 
     plt.title(title)
+
 
 def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
     file_reader = FileReader(full_path)
-
 
     while file_reader.hasData():
         # Number of events to read at once
@@ -886,8 +919,6 @@ def runAnalysisJit(path_, file_, gt_path):
         channels = data.getChannels()
         timetags = data.getTimestamps()
 
-
-
         R = 2400000
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
@@ -899,15 +930,11 @@ def runAnalysisJit(path_, file_, gt_path):
         section_list = find_diff_regions(dirtyClock,extra = 5)
         print("LENGTH OF SECTION LIST: ", len(section_list))
 
-
-
-
         calibrate_number = 0
         sequence_offset = 0
         SEQ = calibrate_number + sequence_offset
         calibrate_section = section_list[calibrate_number]  # should always be the first section
         m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]  # only use a small portion for cal.
-
 
         offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]]
         dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
@@ -915,7 +942,6 @@ def runAnalysisJit(path_, file_, gt_path):
         # find all numbers around the same value as "dirty"
         dirty_clock_offset_1 = np.mean(
             offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
-
 
         CLOCK_PERIOD = 3200000
         # will input datatags that correspond only to individual sequences
@@ -931,31 +957,23 @@ def runAnalysisJit(path_, file_, gt_path):
         viz_correction_effect(sequence_counts, slices, corr1, corr2)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
 
-        #print("offset before the addition is: ",offset)
-
         t1 = time.time()
         imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
-
-
-        # continue using section_list, but adjust it to conform to
-        # the shorter imgData array.
-        #print("offset tags time: ", time.time() - t1)
 
         section_list = section_list - calibrate_section[1]
 
         # imgData is now shorter than dualData because it does not include the calibrate region.
-
         # new versions of these arrays that don't include the calibrate section
         histClock = histClock[calibrate_section[1]:]
         dirtyClock = dirtyClock[calibrate_section[1]:]
-
 
         imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
 
         # loop over the whole image
         t1 = time.time()
         TTS = []
-        results = [[]] # inside should match res_idx
+        results = [[]]  # inside should match res_idx
+        Diffs = []
         for i, slice in enumerate(section_list[:-1]):
             if i == 0:  # fist section used only for calibration
                 continue
@@ -966,34 +984,25 @@ def runAnalysisJit(path_, file_, gt_path):
             left = slice[0]
             right = slice[1]
 
-            #print("in the loop, sections are: ", left, right)
+            # print("in the loop, sections are: ", left, right)
 
-            #print("left: ", left)
-            #print("right: ", right)
+            # print("left: ", left)
+            # print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
             dirtyClock_offset = histClock[left:right]
             dirtyClock_b = dirtyClock[left:right]
 
-
-
-            #print("dirtyclock offset: ", dirtyClock_offset[:50])
-
-
             sorted = np.sort(dirtyClock_offset)
-
-            # locations = np.where(np.diff(sorted) > 100)[0] # this could still be a problem if the dirtyclock is near zero
 
             sorted = sorted[sorted != 0]
             locations = np.where(np.diff(sorted) > 100)[0] # would only expect diff to have one element
             dirty_clock_of1 = np.mean(sorted[0:locations[0] - 1])
             dirty_clock_of2 = np.mean(sorted[locations[0] + 1:])
 
-            #print("dirtyclock: ", dirtyClock_b[:50])
-
-            #print("diffs: ", np.diff(dirtyClock_b[dirtyClock_b > 0])[:50])
-
-            #discrete_offset = np.mean(dirtyClock_offset[(dirtyClock_offset < 2000000) & (dirtyClock_offset > 0)]) #+ offset
-            #print("discrete offset: ", discrete_offset)
+            # print("dirtyclock: ", dirtyClock_b[:50])
+            # print("diffs: ", np.diff(dirtyClock_b[dirtyClock_b > 0])[:50])
+            # discrete_offset = np.mean(dirtyClock_offset[(dirtyClock_offset < 2000000) & (dirtyClock_offset > 0)]) #+ offset
+            # print("discrete offset: ", discrete_offset)
 
             # print("length of Clocks: ", len(Clocks))
             # print("length of dirtyClocks: ", len(dirtyClock))
@@ -1005,12 +1014,13 @@ def runAnalysisJit(path_, file_, gt_path):
             current_data_corrected_1 = offset_tags_single(current_data_corrected,offset_adjustment_1,CLOCK_PERIOD)
             current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
 
-            results1, TT1 = decode_ppm(current_data_corrected_1, gt_path, i, res_idx = [3])
-            results2, TT2 = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
+            results1, TT1, diffs = decode_ppm(current_data_corrected_1, gt_path, i, res_idx = [3])
+            results2, TT2, _ = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
+
+
 
             if TT1 > TT2:
                 TTS.append(TT1)
-                #results.extend(results1)
 
                 for res, master_res in zip(results1, results):
                     master_res.extend(res)
@@ -1019,22 +1029,32 @@ def runAnalysisJit(path_, file_, gt_path):
                 # results.extend(results2)
                 for res, master_res in zip(results2, results):
                     master_res.extend(res)
-            #print()
+
+            Diffs.extend(diffs)
+            ## important! I need to resolve this.
+            # if TT1 == 0 and TT2 == 0:
+            #     print(results1)
+            #     print("#####################")
+            #     print(results2)
+            # print()
 
         print("loop time: ", time.time() - t1)
         TTS = np.array(TTS)
         print("ACCURACY: ", np.mean(TTS)/9)
 
 
+        # x = np.arange(0,32000000,10)
+        # Diffs = np.array(Diffs)
+        # Diffs = Diffs * -1
+        # hist,bins = np.histogram(Diffs,bins = x)
 
-
-
-
-
-
-        #############
+        plt.figure()
+        plt.plot(bins[:-1],hist)
+        print(Diffs[:100])
 
         real_data_bins = np.linspace(0, 3200000, 10000)
+
+
         real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
         source = ColumnDataSource(data=dict(
             x=bins[:-1],
@@ -1052,25 +1072,26 @@ def runAnalysisJit(path_, file_, gt_path):
         # s3.xaxis.axis_label = "time"
         # s3.yaxis.axis_label = "count rate (MCounts/s)"
         s4.line('x', 'y', source=source)
-        #########
-
 
         graphs = [s1, s2, s4]
+
+
+
         return results, graphs
 
 
-
 if __name__ == "__main__":
-    #path = "..//..//July27//"
+    # path = "..//..//July27//"
     path = "..//..//July29//"
-    #file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
+    # file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
-    #file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
-    #file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
-    #file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-    file = "340s_.002_.050_july29_picScan_16.0.1.ttbin"
+    # file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
+    # file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
+    # file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
+    file = "340s_.002_.050_july29_picScan_38.0.1.ttbin"
     gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
-    #s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
+    # s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
     results, graphs = runAnalysisJit(path, file, gt_path)
-
+    print(results[0])
+    print("LENGTH OF RESULTS: ", len(results[0]))
     show(column(graphs[0],graphs[1],graphs[2]))

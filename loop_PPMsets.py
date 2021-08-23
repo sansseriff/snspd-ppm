@@ -44,7 +44,7 @@ for i, (file, att) in enumerate(zip(file_list,att_list)):
     #print(results)
     Results[str(att)] = results
 
-with open("output.json",'w') as f:
+with open("output_20GHz_2.json",'w') as f:
     json.dump(Results,f,indent=4)
 
 
