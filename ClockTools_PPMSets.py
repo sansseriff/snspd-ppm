@@ -93,6 +93,8 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                 continue
 
             else:
+                # if entire awg sequence runs result in no new tags, the while loop may run more than once.
+                # add nan to dualData whenever it runs twice or more, to signify lost sequence.
                 while _timetags[i] >= clock0_extended + sub:
                     cki = cki + 1
                     #clock0_extended = clock_set[cki]
@@ -101,6 +103,9 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
 
                 if _channels[i] == refChan:
                     # do something with it later
+
+                    # these arrays are mostly zero, because u is incremented with dualData more often
+                    # than we get here.
                     dirtyClock[u] = _timetags[i]
                     histClock[u] = _timetags[i] - clock0_extended
                     continue

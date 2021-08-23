@@ -936,7 +936,10 @@ def runAnalysisJit(path_, file_, gt_path):
         calibrate_section = section_list[calibrate_number]  # should always be the first section
         m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]  # only use a small portion for cal.
 
+        # grab the last little bit of the tags from the 1st calibration awg sequence
         offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]]
+
+
         dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
 
         # find all numbers around the same value as "dirty"
@@ -1043,14 +1046,14 @@ def runAnalysisJit(path_, file_, gt_path):
         print("ACCURACY: ", np.mean(TTS)/9)
 
 
+
         # x = np.arange(0,32000000,10)
         # Diffs = np.array(Diffs)
         # Diffs = Diffs * -1
         # hist,bins = np.histogram(Diffs,bins = x)
-
-        plt.figure()
-        plt.plot(bins[:-1],hist)
-        print(Diffs[:100])
+        # plt.figure()
+        # plt.plot(bins[:-1],hist)
+        # print(Diffs[:100])
 
         real_data_bins = np.linspace(0, 3200000, 10000)
 
@@ -1074,8 +1077,6 @@ def runAnalysisJit(path_, file_, gt_path):
         s4.line('x', 'y', source=source)
 
         graphs = [s1, s2, s4]
-
-
 
         return results, graphs
 
