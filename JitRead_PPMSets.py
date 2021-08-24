@@ -923,6 +923,8 @@ def runAnalysisJit(path_, file_, gt_path):
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
 
+        print("section of histClock: ", histClock[1000:1100])
+
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
