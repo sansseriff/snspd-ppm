@@ -17,7 +17,7 @@ import phd
 # import matplotlib
 from datetime import datetime
 
-from ClockTools_PPMSets import clockScan
+from ClockTools_PPMSets import clockScan, histScan
 import matplotlib
 import matplotlib.pyplot as plt
 
@@ -372,6 +372,32 @@ def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
 
     plt.title(title)
     return -(y.argmax()/resolution)*clock_period
+
+
+def plot_hists(data, sequence, ground_truth_path, addition, resolution = 1000):
+    sequence_data, set_data = import_ground_truth(ground_truth_path, sequence)
+    clock_period = int(set_data["total_samples"] / (0.001 * set_data["sample_rate"]))
+
+    real_data_bins = np.linspace(0, clock_period, resolution)
+    real_data_hist, real_data_bins = np.histogram(data + addition, bins=real_data_bins)
+    bins = real_data_bins
+    dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
+    dead_time_ps = dead_pulses*set_data["laser_time"]*1e12
+    # print("dead time in ps: ", dead_time_ps)
+
+    # !!!! I am adding dead_time_ps because I want to move the clock tag to:
+    # the FIRST laser pulse of the LAST deadtime in the awg sequences (plus the extra bit at the end of the awg seq).
+    times = np.array(
+        sequence_data["times"]) * 1e12 + dead_time_ps   # adding on 10ns so that redefined clock is 10ns before
+    # the extra 1000 cancels out a 1ns delay added in the sequenceGenerator script
+    ground_truth_hist, bins = np.histogram(times + addition, bins=bins)
+    # x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    plt.figure()
+    plt.plot(bins[:-1],ground_truth_hist*1000, label = "ground truth")
+    plt.plot(real_data_bins[:-1], real_data_hist, label = "real data")
+    plt.title("this shows the offset that's used to reposition refChan is correct")
+    plt.legend()
+
 
 def offset_tags(dual_data,offset,clock_period):
     """
@@ -903,6 +929,15 @@ def viz_current_decoding(data,gt_path, clock_period, cycle_number, start = None,
     plt.title(title)
 
 
+def adjust_ref_channel(_channels, _timetags, _offset, refChan):
+        mask = (_channels == refChan)
+        # timetags_old = np.copy(_timetags)
+        _timetags[mask] = _timetags[mask] - _offset
+        sort = _timetags.argsort()
+        shifted = np.count_nonzero((np.diff(sort)<0))
+        print("shifted ", shifted, " refChan tags before full decode")
+        return _channels[sort], _timetags[sort]
+
 def runAnalysisJit(path_, file_, gt_path):
     full_path = os.path.join(path_, file_)
     file_reader = FileReader(full_path)
@@ -920,14 +955,40 @@ def runAnalysisJit(path_, file_, gt_path):
         timetags = data.getTimestamps()
 
         R = 2400000
+        #print(channels[R:R + 100])
+        hist_tags = histScan(channels[R:R + 60000], timetags[R:R + 60000], -5, -14, 9)
+        bins = np.arange(np.max(hist_tags))
+        hist, bins = np.histogram(hist_tags,bins)
+        plt.figure()
+        plt.plot(bins[:-1],hist)
+        plt.title("for alignment")
+
+        offset = find_rough_offset(hist_tags, 0, gt_path, resolution=50000)
+        print("offset is: ", offset)
+        _, set_data = import_ground_truth(gt_path, 0)
+        CLOCK_PERIOD = int(set_data["total_samples"] / (0.001 * set_data["sample_rate"]))
+        print("CLOCK PERIOD: ", CLOCK_PERIOD)
+
+        hist_tags = offset_tags_single(hist_tags,offset,CLOCK_PERIOD)
+        plot_hists(hist_tags, 0, gt_path, 0, resolution=50000)
+        #plot_hists(hist_tags - offset, 0, gt_path, 0, resolution=50000)
+        # adjust_ref_channel(channels, timetags, offset, 9)
+
+
+        print(channels[R:R + 100])
+        channels, timetags = adjust_ref_channel(channels, timetags, offset, 9)
+        print(channels[R:R + 100])
+
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
 
-        print("section of histClock: ", histClock[1000:1100])
+        #print("section of histClock: ", histClock[0:100])
 
 
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
+
+        return [s1,s2]
 
         section_list = find_diff_regions(dirtyClock,extra = 5)
         print("LENGTH OF SECTION LIST: ", len(section_list))
@@ -948,7 +1009,7 @@ def runAnalysisJit(path_, file_, gt_path):
         dirty_clock_offset_1 = np.mean(
             offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
 
-        CLOCK_PERIOD = 3200000
+
         # will input datatags that correspond only to individual sequences
         offset = find_rough_offset(m_data, SEQ, gt_path, resolution=1000)
         m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
@@ -1085,16 +1146,24 @@ def runAnalysisJit(path_, file_, gt_path):
 
 if __name__ == "__main__":
     # path = "..//..//July27//"
-    path = "..//..//July29//"
+    #path = "..//..//July29//"
     # file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
     # file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
     # file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
     # file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-    file = "340s_.002_.050_july29_picScan_38.0.1.ttbin"
-    gt_path = "C://Users//Andrew//Desktop//tempImgSave//" # "..//DataGen///TempSave//"
+    #file = "340s_.002_.050_july29_picScan_38.0.1.ttbin"
+    # gt_path = "C://Users//Andrew//Desktop//tempImgSave//"  # "..//DataGen///TempSave//"
+
+
+    # 10 GHz
+    path = "..//..//Aug8_10GHz//"
+    file = "430s_.002_.050_Aug8_picScan_18.0.1.ttbin"
+    gt_path = "C://Users//Andrew//Desktop//imgSave10GHz//"
+
+
     # s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
-    results, graphs = runAnalysisJit(path, file, gt_path)
-    print(results[0])
-    print("LENGTH OF RESULTS: ", len(results[0]))
-    show(column(graphs[0],graphs[1],graphs[2]))
+    #results, graphs = runAnalysisJit(path, file, gt_path)
+    graphs = runAnalysisJit(path, file, gt_path)
+    #show(column(graphs[0],graphs[1],graphs[2]))
+    show(column(graphs[0], graphs[1]))

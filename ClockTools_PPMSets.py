@@ -4,6 +4,27 @@ from numba import njit
 import numpy as np
 
 @njit
+def histScan(_channels,_timetags, dataChan1, dataChan2, refChan):
+    """
+    used for finding and eventually correcting for phase offset bewteen the reference channel and the snspd tags.
+    """
+
+    hist_tags = np.zeros(len(_channels))
+    current_ref = 0
+    j = 0
+
+
+    for i in range(len(_channels)):
+        if _channels[i] == refChan:
+            current_ref = _timetags[i]
+
+        if _channels[i] == dataChan1 and current_ref != 0:
+            hist_tags[j] = _timetags[i] - current_ref
+            j = j + 1
+    return hist_tags[hist_tags > 0]
+
+
+@njit
 def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clock_mult = 1):
     j = 0
     k = 0
@@ -109,12 +130,12 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                 # tag = _timetags[i] - clock0
 
                 if _channels[i] == refChan:
-                    # do something with it later
-
-                    # these arrays are mostly zero, because u is incremented with dualData more often
-                    # than we get here.
                     dirtyClock[u] = _timetags[i]
                     histClock[u] = _timetags[i] - clock0_extended
+                    # add awg sequence seperation marker using np.nan in dualData
+                    dualData[u, 0] = np.nan
+                    dualData[u, 1] = np.nan
+                    u = u + 1
                     continue
 
                 tag = _timetags[i] - clock0_extended
