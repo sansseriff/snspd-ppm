@@ -4,6 +4,7 @@ from TimeTagger import createTimeTagger, FileWriter, FileReader
 import os
 import numpy as np
 from numba import njit
+from numba.typed import List
 import yaml
 import time
 import json
@@ -11,12 +12,13 @@ import timeit
 from bokeh.plotting import figure, output_file, show
 from scipy.stats import norm
 from scipy.interpolate import interp1d
+from scipy.signal import fftconvolve
 import math
 from scipy.stats import norm
 import phd
 # import matplotlib
 from datetime import datetime
-
+from nan_seperation import seperate_by_nans
 from ClockTools_PPMSets import clockScan, histScan
 import matplotlib
 import matplotlib.pyplot as plt
@@ -285,7 +287,12 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
     return s3, X, Y
 
 
-
+def fft_convolve(array1, array2):
+    array1 = np.flip(array1)
+    tiled_array2 = np.tile(array2, 2)
+    q = fftconvolve(array1, tiled_array2, mode='valid')
+    print("length of fft convolve: ", len(q))
+    return np.arange(len(q)), np.flip(q)
 
 
 @njit
@@ -365,7 +372,8 @@ def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
         sequence_data["times"]) * 1e12 + dead_time_ps  # adding on 10ns so that redefined clock is 10ns before first data
     # the extra 1000 cancels out a 1ns delay added in the sequenceGenerator script
     ground_truth_hist, bins = np.histogram(times, bins=bins)
-    x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    # x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    x,y = fft_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
     plt.figure()
     plt.plot(x,y)
     title = f"convolution max found at {y.argmax()}"
@@ -406,11 +414,12 @@ def offset_tags(dual_data,offset,clock_period):
     to the previous or successive group of tags with with a single clock reference.
     """
     dual_data = dual_data - offset
-    greater_than_mask = (dual_data[:,0] > clock_period)
-    less_than_mask = (dual_data[:,0] < 0)
+    greater_than_mask = (dual_data[:,0] > clock_period) & ~np.isnan(dual_data[:,0])
+    less_than_mask = (dual_data[:,0] < 0) & ~np.isnan(dual_data[:,0])
     dual_data[greater_than_mask] = dual_data[greater_than_mask] - clock_period
     dual_data[less_than_mask] = dual_data[less_than_mask] + clock_period
     return dual_data
+
 
 
 def offset_tags_single(data, offset, clock_period):
@@ -542,7 +551,12 @@ def viz_counts_and_correction(counts,slices,corr1,corr2):
     ax[1].plot(slices[:-1], corr2, color='k')
 
 
-def apply_pnr_correction(dual_data, slices, corr1, corr2,seperated_arrays = False):
+def apply_pnr_correction(dual_data_nan, slices, corr1, corr2,seperated_arrays = False):
+    print("length of nans in the input array: ", np.sum(np.isnan(dual_data_nan)))
+
+    nan_mask = np.isnan(dual_data_nan[:,0])
+    not_nan_mask = ~nan_mask  # make it 1D
+    dual_data = dual_data_nan[not_nan_mask]
     corrected1 = np.zeros(len(dual_data))
     corrected2 = np.zeros(len(dual_data))
     array_list1 = []
@@ -560,20 +574,30 @@ def apply_pnr_correction(dual_data, slices, corr1, corr2,seperated_arrays = Fals
             array_list1.append(a)
             array_list2.append(b)
 
+    corrected1_nan = np.zeros(len(dual_data_nan))
+    corrected2_nan = np.zeros(len(dual_data_nan))
+    corrected1_nan[not_nan_mask] = corrected1  # left and right side should be same length
+    corrected2_nan[not_nan_mask] = corrected2
+    corrected1_nan[nan_mask] = np.nan
+    corrected2_nan[nan_mask] = np.nan
+
     if seperated_arrays:
-        return corrected1, corrected2, array_list1, array_list2
+        return corrected1_nan, corrected2_nan, array_list1, array_list2
     else:
-        return corrected1, corrected2
+        return corrected1_nan, corrected2_nan
 
 
-def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False):
+def viz_correction_effect(sequence_counts, slices, corr1, corr2, gt_path, hist_set = False):
     if hist_set:
         corrected1, corrected2, array_list1, array_list2 = apply_pnr_correction(sequence_counts, slices, corr1, corr2,
                                                                             seperated_arrays=True)
     else:
         corrected1, corrected2 = apply_pnr_correction(sequence_counts, slices, corr1, corr2,
                                                                             seperated_arrays=False)
-
+    sequence_data, set_data = import_ground_truth(gt_path, 0)
+    laser_rate = set_data['system']['laser_rate']
+    tbin = (1/laser_rate)*1000  # ps per time bin
+    print("time bin width is: ", tbin)
     plt.figure()
     bins = np.arange(sequence_counts.min(), sequence_counts.max())
     hist, bins = np.histogram(corrected1, bins=bins)
@@ -582,7 +606,7 @@ def viz_correction_effect(sequence_counts, slices, corr1, corr2,hist_set = False
     plt.plot(bins[1:], hist2)
     plt.title("viz correction effect")
 
-    m = (corrected1 <= 25) & (corrected1 > -25)
+    m = (corrected1 <= tbin/2) & (corrected1 > -tbin/2)
     print("ratio: ", m.sum() / len(corrected1))
 
     if hist_set:
@@ -632,7 +656,14 @@ def group_list_generator(tags):
     return group_list, diffs ###
 
 
-def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
+def using_clump(a):
+    list_of_arrays = [a[s] for s in np.ma.clump_unmasked(np.ma.masked_invalid(a))]
+    for arr in list_of_arrays:
+        arr.sort()
+    return list_of_arrays
+
+
+def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
@@ -662,18 +693,13 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         initial_time = initial_time + pulses_per_cycle*laser_time
 
     #tag_group_list = np.split(m_data_corrected, np.where(np.diff(m_data_corrected) <= 0)[0] + 1)
-    tag_group_list, diffs = group_list_generator(m_data_corrected)
+    #tag_group_list, diffs = group_list_generator(m_data_corrected)
+    #tag_group_list, diffs = group_list_generator(m_data_corrected)
+    #print("m data corrected: ", m_data_corrected[:100])
+    #print(m_data_corrected[:20])
+    # tag_group_list = using_clump(m_data_corrected)
+    tag_group_list = seperate_by_nans(m_data_corrected, 20)
 
-
-
-    # if sequence == 100 or sequence == 34 or sequence == 120 or sequence == 300:
-    #     print(tag_group_list)
-    #     plt.figure()
-    #     plt.plot(np.arange(len(diffs)), diffs)
-    #     plt.title("this is for sequence 32")
-
-
-    #######################
     symbol_start = start_symbol_time[0]
     symbol_end = end_time[0]
     data_start = start_data_time[0]
@@ -688,6 +714,7 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         current_list = tag_group_list[idx]
         results = []
         ######
+        #print(current_list)
         for i, tag in enumerate(current_list): #generalize later
             if tag > end_time[-1]:
                 # tag is in extra region at the end of the sequence that doesn't corresponds to any data
@@ -736,16 +763,19 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         results.extend([[-1,'D']]*still_missing)
         ###################
 
-        e = 0
-        for item in results:
-            if item[1] == 'E':
-                e = e + 1
+        # e = 0
+        # for item in results:
+        #     if item[1] == 'E':
+        #         e = e + 1
 
-        if len(current_list) < e and e > 6:
-            print(results)
-            print(current_list)
-            viz_current_decoding(current_list, gt_path, 3200000, sequence, start = start_data_time, end = end_time)
-            print("##################################")
+        # if len(current_list) < e and e > 6:
+        #     print(results)
+        #     print(current_list)
+        #     viz_current_decoding(current_list, gt_path, 3200000, sequence, start = start_data_time, end = end_time)
+        #     print("##################################")
+
+        if sequence == 10:
+            viz_current_decoding(current_list, gt_path, clock_period, sequence, start=start_data_time, end=end_time)
 
 
         # if len(results) != 9:
@@ -782,7 +812,7 @@ def decode_ppm(m_data_corrected, gt_path , sequence, res_idx=[2]):
         if item[1] == 'A':
             tt = tt + 1
 
-    return Results, tt, diffs
+    return Results, tt #  , diffs
 
 
 def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time):
@@ -864,21 +894,16 @@ def find_diff_regions(tags,extra = 3):
     idx_ref = np.arange(len(tags))[mask]
     diffs = np.diff(tags[mask])
 
-
     plt.figure()
     plt.title("clock locking analysis")
     x = np.arange(len(diffs))
     plt.plot(x, diffs)
     ind = np.argpartition(diffs, -100)[-100:]  # the indexes of the 100 largest numbers in diffs (from stack overflow)
-
     ind1000 = np.sort(np.argpartition(diffs, -1000)[-1000:])[:30]
-    print("30 smallest of 1000 largest: ", diffs[ind1000])
-
+    #print("30 smallest of 1000 largest: ", diffs[ind1000])
     general_max = np.mean(diffs[ind])
     #print(np.mean(diffs[ind]))
-
     ints = find_roots(x,diffs - general_max/2)
-
     intersection_viz_y = np.zeros(len(ints)) + general_max/2
     plt.plot(ints, intersection_viz_y,'o',markersize=2)
 
@@ -897,7 +922,6 @@ def find_diff_regions(tags,extra = 3):
 
     plt.plot(sections[35],[general_max/2,general_max/2], 'o', color = 'red')
     plt.plot(sections[100], [general_max / 2, general_max / 2], 'o', color='orange')
-
     plt.plot(sections[307], [general_max / 2, general_max / 2], 'o', color='orange')
 
     # convert sections from the compressed array index to the expanded array index (the format with many zeros)
@@ -943,19 +967,11 @@ def runAnalysisJit(path_, file_, gt_path):
     file_reader = FileReader(full_path)
 
     while file_reader.hasData():
-        # Number of events to read at once
         n_events = 2000000000
-
-        # Read at most n_events.
-        # data is an instance of TimeTagStreamBuffer
         data = file_reader.getData(n_events)
-
-        # these are numpy arrays
         channels = data.getChannels()
         timetags = data.getTimestamps()
-
         R = 2400000
-        #print(channels[R:R + 100])
         hist_tags = histScan(channels[R:R + 60000], timetags[R:R + 60000], -5, -14, 9)
         bins = np.arange(np.max(hist_tags))
         hist, bins = np.histogram(hist_tags,bins)
@@ -963,24 +979,25 @@ def runAnalysisJit(path_, file_, gt_path):
         plt.plot(bins[:-1],hist)
         plt.title("for alignment")
 
-        offset = find_rough_offset(hist_tags, 0, gt_path, resolution=50000)
-        print("offset is: ", offset)
+        t1 = time.time()
+        print("start finding ref offset")
+        ref_offset = find_rough_offset(hist_tags, 0, gt_path, resolution=100000)
+        print("stop finding ref offset")
+        print("find rough offset time is: ", time.time() - t1)
+        print("offset is: ", ref_offset)
         _, set_data = import_ground_truth(gt_path, 0)
         CLOCK_PERIOD = int(set_data["total_samples"] / (0.001 * set_data["sample_rate"]))
         print("CLOCK PERIOD: ", CLOCK_PERIOD)
 
-        hist_tags = offset_tags_single(hist_tags,offset,CLOCK_PERIOD)
+        hist_tags = offset_tags_single(hist_tags,ref_offset,CLOCK_PERIOD)
         plot_hists(hist_tags, 0, gt_path, 0, resolution=50000)
         #plot_hists(hist_tags - offset, 0, gt_path, 0, resolution=50000)
         # adjust_ref_channel(channels, timetags, offset, 9)
-
-
-        print(channels[R:R + 100])
-        channels, timetags = adjust_ref_channel(channels, timetags, offset, 9)
-        print(channels[R:R + 100])
+        channels, timetags = adjust_ref_channel(channels, timetags, ref_offset, 9)
+        #print(channels[R:R + 100])
 
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
-            channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
+            channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4, deriv = 1000, prop=2e-13)
 
         #print("section of histClock: ", histClock[0:100])
 
@@ -988,7 +1005,7 @@ def runAnalysisJit(path_, file_, gt_path):
         s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
         checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
 
-        return [s1,s2]
+        # return [s1,s2]
 
         section_list = find_diff_regions(dirtyClock,extra = 5)
         print("LENGTH OF SECTION LIST: ", len(section_list))
@@ -997,34 +1014,75 @@ def runAnalysisJit(path_, file_, gt_path):
         sequence_offset = 0
         SEQ = calibrate_number + sequence_offset
         calibrate_section = section_list[calibrate_number]  # should always be the first section
-        m_data = dualData[calibrate_section[1] - 500000:calibrate_section[1]]  # only use a small portion for cal.
+        not_nan_mask = ~np.isnan(dualData[:,0])
+        not_nan_dualData = dualData[not_nan_mask]
+
+        # don't want start to be negative
+        if calibrate_section[1] - 500000 > 0:
+            start = calibrate_section[1] - 500000
+        else:
+            start = 0
+
+        m_data = dualData[start:calibrate_section[1]-1000]  # only use a small portion for cal.
+
 
         # grab the last little bit of the tags from the 1st calibration awg sequence
-        offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]]
+        offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]-1000]
 
-
-        dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
+        # dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
 
         # find all numbers around the same value as "dirty"
-        dirty_clock_offset_1 = np.mean(
-            offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
+        # dirty_clock_offset_1 = np.mean(
+            # offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
+        # a = offset_analysis_region[offset_analysis_region != 0]
+        # print(a[:100])
+        # print(a[-100:])
+        print("variance of offset_analysis_region: ", np.var(offset_analysis_region[offset_analysis_region != 0]))
+
+        dirty_clock_offset_1 = np.mean(offset_analysis_region[offset_analysis_region != 0])
+
+        # bins = np.arange(np.max(a))
+        # hist,bins = np.histogram(a, bins = bins)
+        # plt.figure()
+        # plt.plot(bins[:-1],hist)
+
+        # return [s1, s2]
+        # print(m_data[:100])
+        # print(m_data[-100:])
+        bins = np.arange(np.max(m_data[~np.isnan(m_data)]))
+        hist,bins = np.histogram(m_data[~np.isnan(m_data)],bins = bins)
+        plt.figure()
+        plt.plot(bins[:-1],hist)
+        plt.title("m data")
 
 
         # will input datatags that correspond only to individual sequences
-        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=1000)
+        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=100000)
         m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
         sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
                                                         gt_path,region_radius = 5000)
-        start = time.time()
+        # start = time.time()
         slices, corr1, corr2 = find_pnr_correction(sequence_counts)
-        end = time.time()
+        # end = time.time()
 
         viz_counts_and_correction(sequence_counts, slices, corr1, corr2)
-        viz_correction_effect(sequence_counts, slices, corr1, corr2)
+        viz_correction_effect(sequence_counts, slices, corr1, corr2, gt_path)
         m_data_corrected, _ = apply_pnr_correction(m_data, slices, corr1, corr2)
 
+
         t1 = time.time()
+
+        #q = dualData[section_list[3,0]:section_list[3,1]]
+
+        #print(q[:100])
+
+
+        #print(dualData[calibrate_section[1]:])
+
         imgData = offset_tags(dualData[calibrate_section[1]:], offset, CLOCK_PERIOD)
+        #print(imgData[100000:100100])
+
+
 
         section_list = section_list - calibrate_section[1]
 
@@ -1033,37 +1091,56 @@ def runAnalysisJit(path_, file_, gt_path):
         histClock = histClock[calibrate_section[1]:]
         dirtyClock = dirtyClock[calibrate_section[1]:]
 
+        print("number of nans in one axis of imgData: ", np.sum(np.isnan(imgData[:,0])))
         imgData_corrected, _ = apply_pnr_correction(imgData, slices, corr1, corr2)
+        print("number of nan in imgData_corrected: ", np.sum(np.isnan(imgData_corrected)))
 
         # loop over the whole image
         t1 = time.time()
         TTS = []
         results = [[]]  # inside should match res_idx
         Diffs = []
+        offs = []
         for i, slice in enumerate(section_list[:-1]):
             if i == 0:  # fist section used only for calibration
                 continue
 
             # if i > 20:
-            #     break
+            #     hist, bins = np.histogram(offs, bins=np.arange(3000000))
+            #     plt.figure()
+            #     plt.plot(bins[:-1], hist)
+            #     return [s1, s2]
             #print("ITERATION: ", i)
             left = slice[0]
-            right = slice[1]
+            right = slice[1] - 200 # weird that I need the 1000. see log for 8/25/21. some delay issue??
 
             # print("in the loop, sections are: ", left, right)
 
             # print("left: ", left)
             # print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
+            #print("current data corrected: ", current_data_corrected[:100])
             dirtyClock_offset = histClock[left:right]
             dirtyClock_b = dirtyClock[left:right]
 
-            sorted = np.sort(dirtyClock_offset)
+            # sorted = np.sort(dirtyClock_offset)
+            # sorted = sorted[sorted != 0]
+            # locations = np.where(np.diff(sorted) > 100)[0] # would only expect diff to have one element
+            # dirty_clock_of1 = np.mean(sorted[0:locations[0] - 1])
+            # dirty_clock_of2 = np.mean(sorted[locations[0] + 1:])
 
-            sorted = sorted[sorted != 0]
-            locations = np.where(np.diff(sorted) > 100)[0] # would only expect diff to have one element
-            dirty_clock_of1 = np.mean(sorted[0:locations[0] - 1])
-            dirty_clock_of2 = np.mean(sorted[locations[0] + 1:])
+            #print("var of the histClock for 1st cycle: ", np.var(dirtyClock_offset[dirtyClock_offset != 0]))
+
+            dirty_clock_of1 = np.mean(dirtyClock_offset[(dirtyClock_offset != 0) & (~np.isnan(dirtyClock_offset))])
+            print("dirty_clock_of1: ", dirty_clock_of1)
+
+            # print(dirtyClock_offset[:100])
+            # print(dirtyClock_offset[-100:])
+            # plt.figure()
+            # plt.plot(np.arange(len(dirtyClock_offset)),dirtyClock_offset)
+            # plt.title("wierd dirtyclock")
+
+
 
             # print("dirtyclock: ", dirtyClock_b[:50])
             # print("diffs: ", np.diff(dirtyClock_b[dirtyClock_b > 0])[:50])
@@ -1074,29 +1151,45 @@ def runAnalysisJit(path_, file_, gt_path):
             # print("length of dirtyClocks: ", len(dirtyClock))
             # print("lenght of dualData: ", len(dualData))
             X = 0
-            offset_adjustment_1 = round((dirty_clock_of1 - dirty_clock_offset_1)/200)*200
-            offset_adjustment_2 = round((dirty_clock_of2 - dirty_clock_offset_1)/200)*200
+            # this accounts for the discretized (by 200ps) change in phase
+
+            _, set_data = import_ground_truth(gt_path, 0)
+            mult = 16000/set_data['system']['laser_rate']
+            # print(mult)
+
+            offset_adjustment_1 = round((dirty_clock_of1 - dirty_clock_offset_1)/mult)*mult
+            # print("offs: ", dirty_clock_of1 - dirty_clock_offset_1)
+
+            offs.append(dirty_clock_of1 - dirty_clock_offset_1)
+
+            #offset_adjustment_2 = round((dirty_clock_of2 - dirty_clock_offset_1)/200)*200
 
             current_data_corrected_1 = offset_tags_single(current_data_corrected,offset_adjustment_1,CLOCK_PERIOD)
-            current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
+            #current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
 
-            results1, TT1, diffs = decode_ppm(current_data_corrected_1, gt_path, i, res_idx = [3])
-            results2, TT2, _ = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
+            results1, TT1 = decode_ppm(current_data_corrected_1, gt_path, i, CLOCK_PERIOD, res_idx = [3])
+            print(results1)
+            #results2, TT2, _ = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
+            #print(results1)
+            #print(results1)
+
+            # if TT1 > TT2:
+            #     TTS.append(TT1)
+            #
+            #     for res, master_res in zip(results1, results):
+            #         master_res.extend(res)
+            # if TT2 > TT1:
+            #     TTS.append(TT2)
+            #     # results.extend(results2)
+            #     for res, master_res in zip(results2, results):
+            #         master_res.extend(res)
+
+            for res, master_res in zip(results1, results):
+                master_res.extend(res)
+            TTS.append(TT1)
 
 
-
-            if TT1 > TT2:
-                TTS.append(TT1)
-
-                for res, master_res in zip(results1, results):
-                    master_res.extend(res)
-            if TT2 > TT1:
-                TTS.append(TT2)
-                # results.extend(results2)
-                for res, master_res in zip(results2, results):
-                    master_res.extend(res)
-
-            Diffs.extend(diffs)
+            #Diffs.extend(diffs)
             ## important! I need to resolve this.
             # if TT1 == 0 and TT2 == 0:
             #     print(results1)
@@ -1106,8 +1199,7 @@ def runAnalysisJit(path_, file_, gt_path):
 
         print("loop time: ", time.time() - t1)
         TTS = np.array(TTS)
-        print("ACCURACY: ", np.mean(TTS)/9)
-
+        print("ACCURACY: ", np.mean(TTS)/8)
 
 
         # x = np.arange(0,32000000,10)
@@ -1118,29 +1210,28 @@ def runAnalysisJit(path_, file_, gt_path):
         # plt.plot(bins[:-1],hist)
         # print(Diffs[:100])
 
-        real_data_bins = np.linspace(0, 3200000, 10000)
-
-
-        real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
-        source = ColumnDataSource(data=dict(
-            x=bins[:-1],
-            y=real_data_hist
-        ))
-
-        TOOLTIPS = [
-            ("index", "$index"),
-            ("(x,y)", "($x, $y)")
-        ]
-        Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
-        s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
-                    output_backend="svg", tools=Tools,
-                    active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
+        # real_data_bins = np.linspace(0, 3200000, 10000)
+        #
+        #
+        # real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
+        # source = ColumnDataSource(data=dict(
+        #     x=bins[:-1],
+        #     y=real_data_hist
+        # ))
+        #
+        # TOOLTIPS = [
+        #     ("index", "$index"),
+        #     ("(x,y)", "($x, $y)")
+        # ]
+        # Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
+        # s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
+        #             output_backend="svg", tools=Tools,
+        #             active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
         # s3.xaxis.axis_label = "time"
         # s3.yaxis.axis_label = "count rate (MCounts/s)"
-        s4.line('x', 'y', source=source)
+        # s4.line('x', 'y', source=source)
 
-        graphs = [s1, s2, s4]
-
+        graphs = [s1, s2]
         return results, graphs
 
 
@@ -1158,12 +1249,13 @@ if __name__ == "__main__":
 
     # 10 GHz
     path = "..//..//Aug8_10GHz//"
-    file = "430s_.002_.050_Aug8_picScan_18.0.1.ttbin"
+    file = "430s_.002_.050_Aug8_picScan_38.0.1.ttbin"
     gt_path = "C://Users//Andrew//Desktop//imgSave10GHz//"
 
 
     # s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
     #results, graphs = runAnalysisJit(path, file, gt_path)
-    graphs = runAnalysisJit(path, file, gt_path)
+    results, graphs = runAnalysisJit(path, file, gt_path)
     #show(column(graphs[0],graphs[1],graphs[2]))
     show(column(graphs[0], graphs[1]))
+    #print(results)

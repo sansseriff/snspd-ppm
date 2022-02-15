@@ -12,6 +12,7 @@ import timeit
 from bokeh.plotting import figure, output_file, show
 from scipy.stats import norm
 from scipy.interpolate import interp1d
+from scipy.signal import fftconvolve
 import math
 from scipy.stats import norm
 import phd
@@ -287,11 +288,17 @@ def analyze_count_rate(timetags, channels, checkChan, reduc):
 
     return s3, X, Y
 
+# this is acctually a 'correlation'. That's why I'm doing the flips. To convert from convolution to correlation
+def fft_convolve(array1, array2):
+    array1 = np.flip(array1)
+    tiled_array2 = np.tile(array2, 2)
+    q = fftconvolve(array1, tiled_array2, mode='valid')
+    print("length of fft convolve: ", len(q))
+    return np.arange(len(q)), np.flip(q)
 
 
 
-
-#@njit
+@njit
 def jit_convolve(array1,array2):
     q = np.zeros(len(array1))
     # for i in range(len(array1)):
@@ -371,7 +378,8 @@ def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
     # the extra 1000 cancels out a 1ns delay added in the sequenceGenerator script
     ground_truth_hist, bins = np.histogram(times, bins=bins)
     #return 0
-    x, y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    # x, y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    x, y = fft_convolve(ground_truth_hist.astype(float), real_data_hist.astype(float))
     # y = ndimage.convolve(ground_truth_hist, real_data_hist, mode='wrap')
     # x = bins[:-1]
 
@@ -381,6 +389,7 @@ def find_rough_offset(data,sequence,ground_truth_path,resolution = 1000):
     title = f"convolution max found at {x[y.argmax()]}"
 
     plt.title(title)
+    # return -((y.argmax() - len(y))/resolution)*clock_period
     return -(y.argmax()/resolution)*clock_period
 
 
@@ -401,7 +410,7 @@ def plot_hists(data, sequence, ground_truth_path, addition, resolution = 1000):
         sequence_data["times"]) * 1e12 + dead_time_ps   # adding on 10ns so that redefined clock is 10ns before
     # the extra 1000 cancels out a 1ns delay added in the sequenceGenerator script
     ground_truth_hist, bins = np.histogram(times + addition, bins=bins)
-    # x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
+    x,y = jit_convolve(ground_truth_hist.astype(float),real_data_hist.astype(float))
     plt.figure()
     plt.plot(bins[:-1],ground_truth_hist*1000, label = "ground truth")
     plt.plot(real_data_bins[:-1], real_data_hist, label = "real data")
@@ -993,11 +1002,6 @@ def runAnalysisJit(path_, file_, gt_path):
         print("len of hist_tags: ", len(hist_tags))
         print(hist_tags)
         bins = np.arange(int(np.max(hist_tags)))
-        #hist, bins = np.histogram(hist_tags,bins)
-        # print("ending hist: ")
-        # plt.figure()
-        # plt.plot(bins[:-1],hist)
-        # plt.title("for alignment")
         print("starting rough offset")
         ref_offset = find_rough_offset(hist_tags, 0, gt_path, resolution=100000)
         print("offset is: ", ref_offset)
@@ -1013,7 +1017,7 @@ def runAnalysisJit(path_, file_, gt_path):
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4)
 
 
-        print(dirtyClock[:100])
+        # print(dirtyClock[:100])
 
         #print("section of histClock: ", histClock[0:100])
 
@@ -1273,7 +1277,7 @@ if __name__ == "__main__":
 
     # 20 GHz
     path = "..//..//Sept10_20GHz//"
-    file = "340s_.008_.050_Sept10_picScan_38.0.1.ttbin"
+    file = "340s_.008_.050_Sept10_picScan_34.0.1.ttbin"
     gt_path = "C://Users//Andrew//Desktop//tempImgSave//"
 
 

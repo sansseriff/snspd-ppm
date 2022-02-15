@@ -8,11 +8,9 @@ def histScan(_channels,_timetags, dataChan1, dataChan2, refChan):
     """
     used for finding and eventually correcting for phase offset bewteen the reference channel and the snspd tags.
     """
-
     hist_tags = np.zeros(len(_channels))
     current_ref = 0
     j = 0
-
 
     for i in range(len(_channels)):
         if _channels[i] == refChan:
@@ -21,15 +19,21 @@ def histScan(_channels,_timetags, dataChan1, dataChan2, refChan):
         if _channels[i] == dataChan1 and current_ref != 0:
             hist_tags[j] = _timetags[i] - current_ref
             j = j + 1
+
+
+    hist_tags = hist_tags[hist_tags > 0]
+
+    if len(hist_tags) == 0:
+        print("histtags empty. region scanned does not have ref channel or data tags. ")
     return hist_tags[hist_tags > 0]
 
 
 @njit
-def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clock_mult = 1):
+def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clock_mult = 1, deriv = 20000, prop = 1e-13):
     j = 0
     k = 0
-    deriv = 20000  # increasing this gives less oscillations
-    prop = .0000000000001
+    # deriv = 20000  # increasing this gives less oscillations
+    # prop = .0000000000001
     # deriv = 1800
     # prop = .000000000005
     phi0 = 0
@@ -90,25 +94,11 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                 sub = delta_clock/clock_mult
                 for p in range(len(clock_set)):
                     clock_set[p] = clock0 + p*sub
-                # if j == 32:
-                #     print("j32 delta clock: ", delta_clock)
-                #     print("sub: ", sub)
-                #     print("clock_set: ", clock_set)
-                # if j == 8000:
-                #     print("##############################")
-                #     print("j8000 delta clock: ", delta_clock)
-                #     print("sub: ", sub)
-                #     print("clock_set: ", clock_set)
-                # if j == 16000:
-                #     print("##############################")
-                #     print("j32 delta clock: ", delta_clock)
-                #     print("sub: ", sub)
-                #     print("clock_set: ", clock_set)
                 clock0_extended = clock0
                 cki = 0
             j = j + 1
 
-        else: #data channels
+        else:  # data channels
             if j < 4:
                 # not enough recovered clocks available yet. Throw out that data
                 continue
@@ -124,7 +114,6 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                     #     dirtyClock[u] = _timetags[i]
                     #     histClock[u] = _timetags[i] - clock0_extended
                     cki = cki + 1
-                    #clock0_extended = clock_set[cki]
                     clock0_extended = clock0_extended + sub
                     sc = sc + 1
                 # tag = _timetags[i] - clock0
@@ -145,12 +134,9 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
                 k = k + 1
                 if _channels[i] == dataChan1:
 
-                    dualData[u,0] = tag
+                    dualData[u, 0] = tag
                     countM[u] = _timetags[i]  # this is for count rate analysis in another function
-
-
-
-                if _channels[i] == dataChan2 and abs(tag - dualData[u,0]) < 3000: #2nd tag withing 1ns of 1st tag
+                if _channels[i] == dataChan2 and abs(tag - dualData[u, 0]) < 3000:  # 2nd tag withing 1ns of 1st tag
                     dualData[u, 1] = tag
                     u = u + 1  # pair identified, get ready for next pair
 
@@ -158,12 +144,12 @@ def clockScan(_channels,_timetags, clockChan, dataChan1, dataChan2, refChan, clo
     RecoveredClocks = RecoveredClocks[RecoveredClocks > 0]
     dataTags = dataTags[dataTags > 0]
     Periods = Periods[Periods > 0]
-    dualData = dualData[dualData[:,0] > 0]
+
+    u_mask = (dualData[:,0] > 0) | np.isnan(dualData[:,0])
+    dualData = dualData[u_mask]
     countM = countM[countM > 0]
     dirtyClock = dirtyClock[:len(dualData)]
     histClock = histClock[:len(dualData)]
-
-
     # basis = np.linspace(Clocks[0],Clocks[-1],len(Clocks))
     # diffs = Clocks - basis
     return Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock
