@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 from bokeh.io import output_file, show
 from bokeh.layouts import column
 from bokeh.plotting import figure, curdoc
+import orjson
 
 from bokeh.io import export_svg
 from bokeh.layouts import gridplot
@@ -663,7 +664,7 @@ def using_clump(a):
     return list_of_arrays
 
 
-def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
+def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[1]):
     sequence_data, set_data = import_ground_truth(gt_path, sequence)
     dead_pulses = set_data["pulses_per_cycle"] - set_data["ppm"]["m_value"]
     dead_time_ps = dead_pulses * set_data["laser_time"] * 1e12
@@ -698,7 +699,7 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
     #print("m data corrected: ", m_data_corrected[:100])
     #print(m_data_corrected[:20])
     # tag_group_list = using_clump(m_data_corrected)
-    tag_group_list = seperate_by_nans(m_data_corrected, 20)
+    tag_group_list = seperate_by_nans(m_data_corrected, 200)
 
     symbol_start = start_symbol_time[0]
     symbol_end = end_time[0]
@@ -706,24 +707,37 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
     true_p = true_pulse[0]
     stage = []
     q = 0
-    results = []
+    _results = []
 
     #####
     Results = [0]*len(res_idx)
     for x, idx in enumerate(res_idx):
         current_list = tag_group_list[idx]
-        results = []
+        _results = []
         ######
-        #print(current_list)
-        for i, tag in enumerate(current_list): #generalize later
+        # print(current_list)
+        # has a tendency to process a tag too early...
+        for i, tag in enumerate(current_list): # generalize later
             if tag > end_time[-1]:
                 # tag is in extra region at the end of the sequence that doesn't corresponds to any data
                 break
-            if  tag > symbol_end + (laser_time/2) and len(stage) > 0:  # last slot (like 2047 or 1023) is at time symbol_end
+
+            if tag > symbol_end + (laser_time/2):  # last slot (like 2047 or 1023) is at time symbol_end
                 # incude the len(stage) part so that we don't try to decode empty stage if 1st tag of sequence not found
                 # current stage is full. Process it.
-                results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
-                stage = []
+                if len(stage) > 0:
+                    _results.append(decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
+                    stage = []
+                else:
+                    _results.append([-1, 'D'])
+
+                # if sequence == 37:
+                #     print("symbol end 37: ", symbol_end + (laser_time/2))
+                #     print("tag: ", tag)
+                # if sequence == 46:
+                #     print("symbol end 46: ", symbol_end + (laser_time / 2))
+                #     print("tag: ", tag)
+                    # stage is still []
                 # prepare the next stage.
                 # does current tag fit in next stage or a later stage?
                 # look through remaining symbol regions
@@ -740,15 +754,15 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
 
                             # if last tag, process it now before checking for more
                             if i == len(current_list) - 1:
-                                results.append(
+                                _results.append(
                                     decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
                             break
                         else:
                             # symbol passed with no data. append the vacuume identifier to results.
-                            results.append([-1,'D'])
+                            _results.append([-1,'D'])
                     else:
                         # no more data found in this cycle.
-                        results.append([-1, 'D'])
+                        _results.append([-1, 'D'])
                         break
 
             else:
@@ -756,11 +770,11 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
 
                 # if last tag, process it now before checking for more
                 if i == len(current_list) - 1:
-                    results.append(
+                    _results.append(
                         decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_time))
 
-        still_missing = len(pulses_list) - len(results)
-        results.extend([[-1,'D']]*still_missing)
+        still_missing = len(pulses_list) - len(_results)
+        _results.extend([[-1,'D']]*still_missing)
         ###################
 
         # e = 0
@@ -774,15 +788,29 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
         #     viz_current_decoding(current_list, gt_path, 3200000, sequence, start = start_data_time, end = end_time)
         #     print("##################################")
 
-        if sequence == 10:
-            viz_current_decoding(current_list, gt_path, clock_period, sequence, start=start_data_time, end=end_time)
-
+        # if sequence == 37:
+        #     viz_current_decoding(current_list, gt_path, clock_period, sequence, start=start_data_time, end=end_time)
+        #     print("########## sequence: ", sequence)
+        #     print(current_list)
+        #     print(_results)
+        #
+        # if sequence == 46:
+        #     viz_current_decoding(current_list, gt_path, clock_period, sequence, start=start_data_time, end=end_time)
+        #     print("########## sequence: ", sequence)
+        #     print(current_list)
+        #     print(_results)
+        #
+        # if sequence == 118:
+        #     viz_current_decoding(current_list, gt_path, clock_period, sequence, start=start_data_time, end=end_time)
+        #     print("########## sequence: ", sequence)
+        #     print(current_list)
+        #     print(_results)
 
         # if len(results) != 9:
         #     print(current_list)
         #     viz_current_decoding(current_list, gt_path, 3200000, sequence)
         #     print("symbol end: ", symbol_end)
-        Results[x] = results
+        Results[x] = _results
 
 
     # print("ROBUST RESULT: ", results)
@@ -808,7 +836,7 @@ def decode_ppm(m_data_corrected, gt_path , sequence, clock_period, res_idx=[2]):
     #     print("GT: ", true_pulse)
 
     tt = 0
-    for item in results:
+    for item in _results:
         if item[1] == 'A':
             tt = tt + 1
 
@@ -827,7 +855,7 @@ def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_tim
                 if len(stage) > 1:
                     for i,tag in enumerate(stage):
                         stage[i] = round((tag - data_start)/laser_time)
-                    return [solved,'A'] # ,stage]
+                    return [solved,'A']
                 else:
                     return [solved, 'A']
             else:
@@ -846,27 +874,6 @@ def decode_symbol(stage, symbol_start, symbol_end, data_start, true_p, laser_tim
 
     # if here, all errors are in the deadtime
     return [-1,'E']
-
-
-
-
-'''
-@njit
-def section_list_manager(section_list):
-
-    #for
-
-    section_results = []
-    section_result = np.zeros(len(GROUND TRUTH LENGTH))
-    for section in section_list:
-        for tag in section:
-            if tag > symbol_left[i] and tag < symbol_right[i]:
-                # do something with it
-            else:
-                # go onto next tag
-
-        section_results.append(section_result)
-'''
 
 
 def find_first_dirtyClock(array, num):
@@ -908,7 +915,6 @@ def find_diff_regions(tags,extra = 3):
     plt.plot(ints, intersection_viz_y,'o',markersize=2)
 
     sections = []
-    #print("INTS: ", ints[:100])
     sections.append([0,int(math.floor(ints[0]))]) # the first big calibrate section
     for i in range(1,len(ints)-1):
         if ints[i] - ints[i-1] < 4 and ints[i+1] - ints[i] > 30:
@@ -941,7 +947,7 @@ def viz_current_decoding(data,gt_path, clock_period, cycle_number, start = None,
     regions = make_ground_truth_regions(gt_path, clock_period, cycle_number)
     fig,ax = plt.subplots(1,1)
     #plt.plot(bins[1:], gthist * 200)
-    ax.plot(final_bins[1:], final_hist)
+    ax.plot(final_bins[1:], final_hist, linewidth=3)
     title = "viz_current_decoding of cycle number: " + str(cycle_number)
     for i in range(len(regions)):
         ax.axvspan(regions[i,0],regions[i,1], facecolor = 'g', alpha = 0.3)
@@ -981,7 +987,7 @@ def runAnalysisJit(path_, file_, gt_path):
 
         t1 = time.time()
         print("start finding ref offset")
-        ref_offset = find_rough_offset(hist_tags, 0, gt_path, resolution=100000)
+        ref_offset = find_rough_offset(hist_tags, 0, gt_path, resolution=800000)
         print("stop finding ref offset")
         print("find rough offset time is: ", time.time() - t1)
         print("offset is: ", ref_offset)
@@ -999,11 +1005,10 @@ def runAnalysisJit(path_, file_, gt_path):
         Clocks, RecoveredClocks, dataTags, dataTagsR, dualData, countM, dirtyClock, histClock = clockScan(
             channels[R:-1], timetags[R:-1], 18, -5, -14, 9, clock_mult=4, deriv = 1000, prop=2e-13)
 
-        #print("section of histClock: ", histClock[0:100])
 
 
-        s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
-        checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
+        # s1, s2 = checkLocking(Clocks[0:-1:20], RecoveredClocks[0:-1:20])
+        # checkLocking(Clocks[0:-1], RecoveredClocks[0:-1],mpl = True)
 
         # return [s1,s2]
 
@@ -1025,30 +1030,13 @@ def runAnalysisJit(path_, file_, gt_path):
 
         m_data = dualData[start:calibrate_section[1]-1000]  # only use a small portion for cal.
 
-
         # grab the last little bit of the tags from the 1st calibration awg sequence
         offset_analysis_region = histClock[calibrate_section[1]-10000:calibrate_section[1]-1000]
 
-        # dirty = find_trailing_dirtyClock(offset_analysis_region, 1)
-
-        # find all numbers around the same value as "dirty"
-        # dirty_clock_offset_1 = np.mean(
-            # offset_analysis_region[(offset_analysis_region > (dirty - 100)) & (offset_analysis_region < (dirty + 100))])
-        # a = offset_analysis_region[offset_analysis_region != 0]
-        # print(a[:100])
-        # print(a[-100:])
         print("variance of offset_analysis_region: ", np.var(offset_analysis_region[offset_analysis_region != 0]))
 
         dirty_clock_offset_1 = np.mean(offset_analysis_region[offset_analysis_region != 0])
 
-        # bins = np.arange(np.max(a))
-        # hist,bins = np.histogram(a, bins = bins)
-        # plt.figure()
-        # plt.plot(bins[:-1],hist)
-
-        # return [s1, s2]
-        # print(m_data[:100])
-        # print(m_data[-100:])
         bins = np.arange(np.max(m_data[~np.isnan(m_data)]))
         hist,bins = np.histogram(m_data[~np.isnan(m_data)],bins = bins)
         plt.figure()
@@ -1057,7 +1045,7 @@ def runAnalysisJit(path_, file_, gt_path):
 
 
         # will input datatags that correspond only to individual sequences
-        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=100000)
+        offset = find_rough_offset(m_data, SEQ, gt_path, resolution=800000)
         m_data = offset_tags(m_data, offset, CLOCK_PERIOD)
         sequence_counts = generate_PNR_analysis_regions(m_data, SEQ, CLOCK_PERIOD,
                                                         gt_path,region_radius = 5000)
@@ -1105,53 +1093,17 @@ def runAnalysisJit(path_, file_, gt_path):
             if i == 0:  # fist section used only for calibration
                 continue
 
-            # if i > 20:
-            #     hist, bins = np.histogram(offs, bins=np.arange(3000000))
-            #     plt.figure()
-            #     plt.plot(bins[:-1], hist)
-            #     return [s1, s2]
-            #print("ITERATION: ", i)
             left = slice[0]
             right = slice[1] - 200 # weird that I need the 1000. see log for 8/25/21. some delay issue??
 
-            # print("in the loop, sections are: ", left, right)
-
-            # print("left: ", left)
-            # print("right: ", right)
             current_data_corrected = imgData_corrected[left:right]
             #print("current data corrected: ", current_data_corrected[:100])
             dirtyClock_offset = histClock[left:right]
             dirtyClock_b = dirtyClock[left:right]
 
-            # sorted = np.sort(dirtyClock_offset)
-            # sorted = sorted[sorted != 0]
-            # locations = np.where(np.diff(sorted) > 100)[0] # would only expect diff to have one element
-            # dirty_clock_of1 = np.mean(sorted[0:locations[0] - 1])
-            # dirty_clock_of2 = np.mean(sorted[locations[0] + 1:])
-
-            #print("var of the histClock for 1st cycle: ", np.var(dirtyClock_offset[dirtyClock_offset != 0]))
 
             dirty_clock_of1 = np.mean(dirtyClock_offset[(dirtyClock_offset != 0) & (~np.isnan(dirtyClock_offset))])
-            print("dirty_clock_of1: ", dirty_clock_of1)
 
-            # print(dirtyClock_offset[:100])
-            # print(dirtyClock_offset[-100:])
-            # plt.figure()
-            # plt.plot(np.arange(len(dirtyClock_offset)),dirtyClock_offset)
-            # plt.title("wierd dirtyclock")
-
-
-
-            # print("dirtyclock: ", dirtyClock_b[:50])
-            # print("diffs: ", np.diff(dirtyClock_b[dirtyClock_b > 0])[:50])
-            # discrete_offset = np.mean(dirtyClock_offset[(dirtyClock_offset < 2000000) & (dirtyClock_offset > 0)]) #+ offset
-            # print("discrete offset: ", discrete_offset)
-
-            # print("length of Clocks: ", len(Clocks))
-            # print("length of dirtyClocks: ", len(dirtyClock))
-            # print("lenght of dualData: ", len(dualData))
-            X = 0
-            # this accounts for the discretized (by 200ps) change in phase
 
             _, set_data = import_ground_truth(gt_path, 0)
             mult = 16000/set_data['system']['laser_rate']
@@ -1167,95 +1119,78 @@ def runAnalysisJit(path_, file_, gt_path):
             current_data_corrected_1 = offset_tags_single(current_data_corrected,offset_adjustment_1,CLOCK_PERIOD)
             #current_data_corrected_2 = offset_tags_single(current_data_corrected, offset_adjustment_2, CLOCK_PERIOD)
 
-            results1, TT1 = decode_ppm(current_data_corrected_1, gt_path, i, CLOCK_PERIOD, res_idx = [3])
-            print(results1)
+            results1, TT1 = decode_ppm(current_data_corrected_1, gt_path, i, CLOCK_PERIOD, res_idx = [1])
             #results2, TT2, _ = decode_ppm(current_data_corrected_2, gt_path, i, res_idx = [3])
-            #print(results1)
-            #print(results1)
+            print(results1)
 
-            # if TT1 > TT2:
-            #     TTS.append(TT1)
-            #
-            #     for res, master_res in zip(results1, results):
-            #         master_res.extend(res)
-            # if TT2 > TT1:
-            #     TTS.append(TT2)
-            #     # results.extend(results2)
-            #     for res, master_res in zip(results2, results):
-            #         master_res.extend(res)
 
             for res, master_res in zip(results1, results):
                 master_res.extend(res)
             TTS.append(TT1)
-
-
-            #Diffs.extend(diffs)
-            ## important! I need to resolve this.
-            # if TT1 == 0 and TT2 == 0:
-            #     print(results1)
-            #     print("#####################")
-            #     print(results2)
-            # print()
 
         print("loop time: ", time.time() - t1)
         TTS = np.array(TTS)
         print("ACCURACY: ", np.mean(TTS)/8)
 
 
-        # x = np.arange(0,32000000,10)
-        # Diffs = np.array(Diffs)
-        # Diffs = Diffs * -1
-        # hist,bins = np.histogram(Diffs,bins = x)
-        # plt.figure()
-        # plt.plot(bins[:-1],hist)
-        # print(Diffs[:100])
-
-        # real_data_bins = np.linspace(0, 3200000, 10000)
-        #
-        #
-        # real_data_hist, bins = np.histogram(m_data[:, 1], bins=real_data_bins)
-        # source = ColumnDataSource(data=dict(
-        #     x=bins[:-1],
-        #     y=real_data_hist
-        # ))
-        #
-        # TOOLTIPS = [
-        #     ("index", "$index"),
-        #     ("(x,y)", "($x, $y)")
-        # ]
-        # Tools = "pan,wheel_zoom,box_zoom,reset,xwheel_zoom"
-        # s4 = figure(plot_width=800, plot_height=400, title="count rate monitor",
-        #             output_backend="svg", tools=Tools,
-        #             active_scroll='xwheel_zoom', tooltips=TOOLTIPS)
-        # s3.xaxis.axis_label = "time"
-        # s3.yaxis.axis_label = "count rate (MCounts/s)"
-        # s4.line('x', 'y', source=source)
-
-        graphs = [s1, s2]
-        return results, graphs
+        # graphs = [s1, s2]
+        return results #, graphs
 
 
 if __name__ == "__main__":
-    # path = "..//..//July27//"
-    #path = "..//..//July29//"
-    # file = "25s_.002_.044_25dB_July7_fullSet_78.125clock_0.3sFalse.1.ttbin"
 
-    # file = "335s_.002_.053_30dB_july27_PICFalse.1.ttbin"
-    # file = "335s_.002_.053_20dB_july27_PICFalse.1.ttbin"
-    # file = "335s_.002_.053_40dB_july27_PICFalse.1.ttbin"
-    #file = "340s_.002_.050_july29_picScan_38.0.1.ttbin"
-    # gt_path = "C://Users//Andrew//Desktop//tempImgSave//"  # "..//DataGen///TempSave//"
+    full_decode = False
+    if full_decode:
+        path = "..//..//Aug8_10GHz//"
+        gt_path = "C://Users//Andrew//Desktop//imgSave10GHz//"
+        file_list = ["430s_.002_.050_Aug8_picScan_18.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_20.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_22.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_24.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_26.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_28.0.1.ttbin"
+                     "430s_.002_.050_Aug8_picScan_30.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_32.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_34.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_36.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_38.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_40.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_42.0.1.ttbin",
+                     "430s_.002_.050_Aug8_picScan_44.0.1.ttbin"]
 
+        DEBUG = False
+        for file in file_list:
+            results = runAnalysisJit(path, file, gt_path)
+            results_bytes = orjson.dumps(results)
 
-    # 10 GHz
-    path = "..//..//Aug8_10GHz//"
-    file = "430s_.002_.050_Aug8_picScan_38.0.1.ttbin"
-    gt_path = "C://Users//Andrew//Desktop//imgSave10GHz//"
+            dB_stub = file.split('_')[-1][:-10]
+            with open(".//final_decode/10GHz//decode_10GHz" + dB_stub + ".json", 'wb') as file:
+                file.write(results_bytes)
+            time.sleep(4)
 
+    else:
+        # 10 GHz
+        path = "..//..//Aug8_10GHz//"
 
-    # s1,s2, s3, s4 = runAnalysisJit(path, file, gt_path)
-    #results, graphs = runAnalysisJit(path, file, gt_path)
-    results, graphs = runAnalysisJit(path, file, gt_path)
-    #show(column(graphs[0],graphs[1],graphs[2]))
-    show(column(graphs[0], graphs[1]))
-    #print(results)
+        file = "430s_.002_.050_Aug8_picScan_18.0.1.ttbin"   # works
+        # file = "430s_.002_.050_Aug8_picScan_20.0.1.ttbin"   # works
+        # file = "430s_.002_.050_Aug8_picScan_22.0.1.ttbin"   # works
+        # file = "430s_.002_.050_Aug8_picScan_24.0.1.ttbin"   # works median: .990 mean: 0.989
+        # file = "430s_.002_.050_Aug8_picScan_26.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_28.0.1.ttbin"   # works median: 0.946   mean: 0.949
+        # file = "430s_.002_.050_Aug8_picScan_30.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_32.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_34.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_36.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_38.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_40.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_42.0.1.ttbin"
+        # file = "430s_.002_.050_Aug8_picScan_44.0.1.ttbin"
+
+        gt_path = "C://Users//Andrew//Desktop//imgSave10GHz//"
+
+        results = runAnalysisJit(path, file, gt_path)
+        #show(column(graphs[0],graphs[1],graphs[2]))
+        # show(column(graphs[0], graphs[1]))
+        #print(results)
+
